@@ -1,0 +1,40 @@
+{
+  "name": "truth-divergence",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx -r tsconfig-paths/register server.ts",
+    "dev:next": "next dev",
+    "build": "next build",
+    "start": "tsx -r tsconfig-paths/register server.ts --prod",
+    "cache:worker": "tsx -r tsconfig-paths/register scripts/case-cache-worker.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "framer-motion": "^12.40.0",
+    "lucide-react": "latest",
+    "mysql2": "^3.22.4",
+    "next": "latest",
+    "openai": "^6.42.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "ws": "^8.21.0",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@types/ws": "^8.18.1",
+    "autoprefixer": "latest",
+    "eslint": "latest",
+    "eslint-config-next": "latest",
+    "playwright": "^1.60.0",
+    "postcss": "latest",
+    "tailwindcss": "3.4.17",
+    "tsconfig-paths": "^4.2.0",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

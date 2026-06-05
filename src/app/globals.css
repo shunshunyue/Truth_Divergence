@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --td-bg: #ede8dc;
+  --td-panel: #fffdf7;
+  --td-carbon: #f4efe5;
+  --td-line: rgba(80, 69, 52, 0.18);
+  --td-scan: #6fd5c7;
+  --td-brass: #d6a247;
+  --td-rust: #c5533d;
+  --td-paper: #2f2a22;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(rgba(47, 42, 34, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(47, 42, 34, 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 20% 8%, rgba(214, 162, 71, 0.16), transparent 28rem),
+    radial-gradient(circle at 86% 18%, rgba(111, 213, 199, 0.16), transparent 28rem),
+    var(--td-bg);
+  background-size: 36px 36px, 36px 36px, auto, auto, auto;
+  color: #27241f;
+  font-family: Aptos, "Segoe UI", sans-serif;
+}
+
+.td-scrollbar {
+  scrollbar-color: rgba(111, 213, 199, 0.35) rgba(255, 255, 255, 0.05);
+  scrollbar-width: thin;
+}
+
+.td-scrollbar::-webkit-scrollbar {
+  width: 0.5rem;
+}
+
+.td-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.td-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(111, 213, 199, 0.32);
+  border: 1px solid rgba(8, 9, 11, 0.75);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.line-clamp-1,
+.line-clamp-2,
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-1 {
+  -webkit-line-clamp: 1;
+}
+
+.line-clamp-2 {
+  -webkit-line-clamp: 2;
+}
+
+.line-clamp-3 {
+  -webkit-line-clamp: 3;
+}
