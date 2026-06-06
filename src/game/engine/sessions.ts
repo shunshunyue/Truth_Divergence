@@ -1,10 +1,20 @@
 import { randomUUID } from "crypto";
 import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
 
+export type SessionChatMessage = {
+  role: "user" | "assistant";
+  speaker: "user" | "assistant" | "suspect" | "system";
+  text: string;
+  label?: string;
+  suspectId?: string;
+  at: string;
+};
+
 export type GameSession = {
   sessionId: string;
   caseData: CaseData;
   state: PlayerCaseState;
+  chatHistory: SessionChatMessage[];
   createdAt: string;
   updatedAt: string;
 };
@@ -16,10 +26,13 @@ const globalStore = globalThis as typeof globalThis & {
 const sessions = globalStore.truthDivergenceSessions ?? new Map<string, GameSession>();
 globalStore.truthDivergenceSessions = sessions;
 
-export function createSession(payload: Omit<GameSession, "sessionId" | "createdAt" | "updatedAt">) {
+export function createSession(payload: Omit<GameSession, "sessionId" | "createdAt" | "updatedAt" | "chatHistory"> & {
+  chatHistory?: SessionChatMessage[];
+}) {
   const now = new Date().toISOString();
   const session: GameSession = {
     ...payload,
+    chatHistory: payload.chatHistory ?? [],
     sessionId: randomUUID(),
     createdAt: now,
     updatedAt: now,
@@ -44,5 +57,22 @@ export function updateSession(sessionId: string, patch: Partial<Omit<GameSession
   };
 
   sessions.set(sessionId, next);
+  return next;
+}
+
+export function appendSessionChatMessage(sessionId: string, message: Omit<SessionChatMessage, "at">) {
+  const previous = sessions.get(sessionId);
+  if (!previous) return undefined;
+
+  const next = updateSession(sessionId, {
+    chatHistory: [
+      ...previous.chatHistory,
+      {
+        ...message,
+        at: new Date().toISOString(),
+      },
+    ].slice(-30),
+  });
+
   return next;
 }

@@ -181,7 +181,13 @@ export function useInvestigationSession() {
     function upsertChatMessage(message: InvestigationChatMessage) {
       setChatMessages((current) => {
         const existing = current.find((item) => item.id === message.id);
-        if (!existing) return [...current, message].slice(-80);
+        if (!existing) {
+          const pendingIndex = current.findIndex((item) => item.clientPending && item.speaker !== "user");
+          if (pendingIndex >= 0 && message.speaker !== "user") {
+            return current.map((item, index) => (index === pendingIndex ? message : item)).slice(-80);
+          }
+          return [...current, message].slice(-80);
+        }
         return current.map((item) => (item.id === message.id ? { ...item, ...message } : item));
       });
     }
@@ -192,8 +198,10 @@ export function useInvestigationSession() {
           item.id === messageId
             ? {
                 ...item,
-                text: `${item.text}${text}`,
+                text: item.placeholder ? text : `${item.text}${text}`,
                 pending: true,
+                placeholder: false,
+                clientPending: false,
               }
             : item,
         ),
@@ -235,6 +243,19 @@ export function useInvestigationSession() {
         setBootError((current) => current || envelope.payload.message);
         setActionStatus(envelope.payload.message);
         setIsActing(false);
+        setChatMessages((current) =>
+          current.map((message) =>
+            message.clientPending && message.placeholder
+              ? {
+                  ...message,
+                  text: envelope.payload.message,
+                  pending: false,
+                  placeholder: false,
+                  clientPending: false,
+                }
+              : message,
+          ),
+        );
       }
 
       if (event === "agent.refusal") {
@@ -255,10 +276,14 @@ export function useInvestigationSession() {
           id: envelope.payload.messageId,
           turnId: envelope.payload.turnId,
           speaker: envelope.payload.speaker,
-          text: "",
+          text:
+            envelope.payload.speaker === "assistant" || envelope.payload.speaker === "suspect"
+              ? "正在调查..."
+              : "",
           label: envelope.payload.label,
           suspectId: envelope.payload.suspectId,
           pending: true,
+          placeholder: envelope.payload.speaker === "assistant" || envelope.payload.speaker === "suspect",
           createdAt: Date.now(),
         });
       }
@@ -276,6 +301,8 @@ export function useInvestigationSession() {
           label: envelope.payload.label,
           suspectId: envelope.payload.suspectId,
           pending: false,
+          placeholder: false,
+          clientPending: false,
           createdAt: Date.now(),
         });
       }
@@ -397,16 +424,29 @@ export function useInvestigationSession() {
 
     setIsActing(true);
     setActionStatus("正在解析行动...");
+    const localTurnId = `local-${Date.now().toString(36)}`;
     setChatMessages((current) =>
       [
         ...current,
         {
           id: `user-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-          turnId: `local-${Date.now().toString(36)}`,
+          turnId: localTurnId,
           speaker: "user" as const,
           text: trimmed,
           label: "你",
           pending: false,
+          createdAt: Date.now(),
+        },
+        {
+          id: `assistant-pending-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          turnId: localTurnId,
+          speaker: "assistant" as const,
+          text: "正在调查...",
+          label: chatMode.mode === "interrogation" ? chatMode.label : "案件 AI 助手",
+          suspectId: chatMode.mode === "interrogation" ? chatMode.suspectId : undefined,
+          pending: true,
+          placeholder: true,
+          clientPending: true,
           createdAt: Date.now(),
         },
       ].slice(-80),
@@ -427,6 +467,7 @@ export function useInvestigationSession() {
     } catch (error) {
       setActionStatus(error instanceof Error ? error.message : "未知行动错误。");
       setIsActing(false);
+      setChatMessages((current) => current.filter((message) => !(message.clientPending && message.turnId === localTurnId)));
       return false;
     }
   }

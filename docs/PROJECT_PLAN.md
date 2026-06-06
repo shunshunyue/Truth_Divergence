@@ -1,17 +1,17 @@
 # Truth Divergence Current Architecture
 
-Truth Divergence is an immersive case-investigation workspace. The player appears to be chatting with an AI at work, but every useful question drives a live investigation: the center chat answers first, then the left and right metadata panels update from canonical game state.
+Truth Divergence is an immersive case-investigation workspace. The player appears to be chatting with an AI at work, but every useful question grows the investigation in real time: the center chat reports what was found, then the left and right metadata panels absorb the newly created evidence, people, locations, timeline events, and relationships.
 
 ## Product Loop
 
-1. The player types a natural-language investigation command.
-2. The server parses it into a bounded game action.
-3. The game engine applies the action against canonical case state.
-4. The center chat streams the assistant or suspect response immediately.
-5. The server emits state and metadata patches for the left and right panels.
-6. The UI stays in one believable investigation surface instead of rendering AI-generated pages.
+1. The cache worker generates a compact truth seed: victim, killer, motive, method, suspect pool, and opening scene.
+2. The player types a natural-language investigation command.
+3. The server parses the command and asks Runtime Discovery to generate what this question uncovers.
+4. The center chat reports the newly found record, event, testimony, or object directly.
+5. The generated discovery is written into canonical case/session state.
+6. The server emits state and metadata patches for the left and right panels.
 
-The key rule is: AI can explain, roleplay, and summarize; the engine owns truth, unlocks, scoring, and state.
+The key rule is: AI can dynamically generate the path, but it cannot change the hidden truth seed. The investigation can improvise; the final answer must still converge.
 
 ## Runtime Transport
 
@@ -84,7 +84,7 @@ The center panel should feel like ordinary AI chat, but the content is case-boun
 
 ### Assistant Mode
 
-Default mode. It answers only case-relevant questions, summarizes discovered facts, compares visible contradictions, and suggests evidence-backed next actions.
+Default mode. It answers only case-relevant questions and directly generates discoveries from the player's question. It should say what was found, not suggest where to go next.
 
 ### Interrogation Mode
 
@@ -100,11 +100,11 @@ The chat should refuse:
 
 ## AI Usage
 
-AI JSON should be used for controlled setup tasks such as case generation, where schema validation matters.
+AI JSON is used for controlled setup tasks such as case generation, where schema validation matters. The generated case is intentionally compact: the truth seed and opening scene come first; evidence, timeline, relationships, and many locations are created during play.
 
-Normal conversation should not force JSON. Future real AI chat should stream plain text from the model into `chat.delta` events, while the game engine continues to produce structured `game.state.patch` and `metadata.patch` events.
+Runtime Discovery also uses JSON internally so newly created evidence and metadata can be patched into the UI. The player still experiences it as plain chat over `chat.delta`.
 
-Current chat replies are deterministic runtime templates. The next AI integration should replace those templates with a text-streaming chat model while preserving the same WebSocket event contract.
+Deterministic runtime templates remain as a fallback when AI credentials are missing or a model request fails.
 
 ## Server Modules
 

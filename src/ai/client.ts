@@ -10,6 +10,14 @@ type AiJsonStreamRequest = {
   onContent?: (content: string) => void;
 };
 
+type AiTextStreamRequest = {
+  messages: AiMessage[];
+  temperature?: number;
+  model?: string;
+  maxTokens?: number;
+  onContent?: (content: string) => void;
+};
+
 function buildChatCompletionsUrl(value: string) {
   const url = new URL(value);
   if (!url.pathname.replace(/\/+$/, "").endsWith("/v1")) {
@@ -107,4 +115,73 @@ export async function requestAiJsonStream<T>({
   }
 
   return JSON.parse(content) as T;
+}
+
+export async function requestAiTextStream({
+  messages,
+  temperature = 0.55,
+  model,
+  maxTokens = 700,
+  onContent,
+}: AiTextStreamRequest): Promise<string> {
+  const { apiKey, chatCompletionsUrl, selectedModel } = getAiConfig(model);
+
+  if (!apiKey || !selectedModel) {
+    throw new Error("UNITY2_AI_API_KEY or UNITY2_AI_MODEL is not configured.");
+  }
+
+  const response = await fetch(chatCompletionsUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: selectedModel,
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+      stream: true,
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    const raw = await response.text().catch(() => "");
+    throw new Error(`AI text stream request failed ${response.status}: ${raw.slice(0, 800)}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data:")) continue;
+
+      const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") continue;
+
+      const parsed = JSON.parse(payload);
+      const delta = parsed?.choices?.[0]?.delta?.content;
+      if (typeof delta !== "string" || !delta) continue;
+
+      content += delta;
+      onContent?.(delta);
+    }
+  }
+
+  if (!content.trim()) {
+    throw new Error("AI text stream response did not include message content.");
+  }
+
+  return content;
 }

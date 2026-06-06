@@ -8,10 +8,16 @@ export function evaluateAgentLoop(caseData: CaseData, state: PlayerCaseState) {
     state.playerTimeline.some((event) => event.id === timelineId),
   );
   const killerVisible = state.visibleSuspects.includes(caseData.truth.killer);
-  const motiveKnown = state.discoveredEvidence.includes("evidence-contract-diary");
+  const motiveKnown =
+    caseData.truth.keyEvidence.length > 0 &&
+    caseData.truth.keyEvidence.some((evidenceId) => state.discoveredEvidence.includes(evidenceId));
 
-  const evidenceScore = Math.round((discoveredKeyEvidence.length / caseData.truth.keyEvidence.length) * 45);
-  const timelineScore = Math.round((knownKeyTimeline.length / caseData.truth.keyTimeline.length) * 25);
+  const evidenceScore = caseData.truth.keyEvidence.length
+    ? Math.round((discoveredKeyEvidence.length / caseData.truth.keyEvidence.length) * 45)
+    : Math.min(30, state.discoveredEvidence.length * 8);
+  const timelineScore = caseData.truth.keyTimeline.length
+    ? Math.round((knownKeyTimeline.length / caseData.truth.keyTimeline.length) * 25)
+    : Math.min(20, state.playerTimeline.length * 6);
   const suspectScore = killerVisible ? 15 : 0;
   const motiveScore = motiveKnown ? 15 : 0;
   const truthScore = Math.min(100, evidenceScore + timelineScore + suspectScore + motiveScore);
@@ -20,6 +26,7 @@ export function evaluateAgentLoop(caseData: CaseData, state: PlayerCaseState) {
     truthScore >= 90 &&
     killerVisible &&
     motiveKnown &&
+    caseData.truth.keyEvidence.length > 0 &&
     caseData.truth.keyEvidence.every((evidenceId) => state.discoveredEvidence.includes(evidenceId));
 
   const phase: PlayerCaseState["phase"] = isSolved

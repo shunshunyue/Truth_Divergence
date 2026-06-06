@@ -2,13 +2,27 @@ import { randomUUID } from "crypto";
 import { claimRandomReadyCase } from "@/game/cache/caseCache";
 import { ensureCaseCacheWorkerStarted } from "@/game/cache/caseCacheWorker";
 import { applyAction } from "@/game/engine/applyAction";
-import { createSession, getSession, updateSession, type GameSession } from "@/game/engine/sessions";
+import {
+  appendSessionChatMessage,
+  createSession,
+  getSession,
+  updateSession,
+  type GameSession,
+} from "@/game/engine/sessions";
 import { writeAgentDispatchLog, writeAgentEventLog } from "@/game/agent/eventLog";
+import { streamAiChatReply } from "@/game/agent/aiChatRuntime";
+import {
+  createFallbackRuntimeDiscoveryFromReply,
+  streamRuntimeDiscoveryReply,
+  structureRuntimeDiscoveryFromReply,
+  type RuntimeDiscovery,
+} from "@/game/agent/runtimeDiscovery";
 import {
   buildAssistantReply,
   buildSuspectReply,
   routeChatCommand,
   type ChatMode,
+  type ChatRoute,
 } from "@/game/agent/chatRuntime";
 import {
   buildCurrentLocationMetadata,
@@ -31,7 +45,7 @@ import type {
   AgentRuntimeEvent,
   AgentSessionPayload,
 } from "@/game/agent/events";
-import type { ActionResult, CaseData, PlayerCaseState } from "@/game/schemas/game";
+import type { ActionResult, CaseData, PlayerCaseState, SuspectProfile } from "@/game/schemas/game";
 
 type Subscriber = {
   id: string;
@@ -122,6 +136,24 @@ function splitTextForStream(text: string) {
   }
   if (buffer) chunks.push(buffer);
   return chunks;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export class RoomAgentRuntime {
@@ -219,7 +251,7 @@ export class RoomAgentRuntime {
         sessionId: session.sessionId,
         speaker: "assistant",
         label: "案件 AI 助手",
-        text: `案件已接入。你可以像问 AI 一样输入调查问题；我会先回答你的问题，再把证据、人物和时间线同步到左右两边。\n当前任务：${session.caseData.openingEvent.initialPrompt}`,
+        text: `案件已接入。你直接问要查什么，我会把查到的记录、证词或现场细节整理出来。\n当前任务：${session.caseData.openingEvent.initialPrompt}`,
       });
       this.scheduleIdleHint(session);
     } catch (error) {
@@ -250,6 +282,12 @@ export class RoomAgentRuntime {
       this.enqueueStatus("正在理解你的问题...", "critical", sessionId);
       const result = applyAction(trimmed, session.caseData, session.state);
       const route = routeChatCommand(trimmed, session.caseData, result.state, this.chatMode, result.parsedAction);
+      appendSessionChatMessage(sessionId, {
+        role: "user",
+        speaker: "user",
+        label: "你",
+        text: trimmed,
+      });
 
       if (route.kind === "off_topic" || route.kind === "spoiler_request") {
         this.enqueue(
@@ -263,12 +301,19 @@ export class RoomAgentRuntime {
           },
           { priority: "critical", sessionId, scope: "chat.refusal" },
         );
+        const refusalText = `${route.reason}\n你可以换成基于证据的问题，例如“比较已发现证据里的时间矛盾”或“用某份证据追问某个人”。`;
         this.streamChatMessage({
           sessionId,
           turnId,
           speaker: "assistant",
           label: "案件 AI 助手",
-          text: `${route.reason}\n你可以换成基于证据的问题，例如“比较已发现证据里的时间矛盾”或“用某份证据追问某个人”。`,
+          text: refusalText,
+        });
+        appendSessionChatMessage(sessionId, {
+          role: "assistant",
+          speaker: "assistant",
+          label: "案件 AI 助手",
+          text: refusalText,
         });
         this.finishTurn(sessionId, turnId);
         this.scheduleIdleHint(session);
@@ -277,14 +322,21 @@ export class RoomAgentRuntime {
 
       let speaker: "assistant" | "suspect" = "assistant";
       let suspectId: string | undefined;
+      let suspect: SuspectProfile | undefined;
       let label = "案件 AI 助手";
       let replyText = "";
+      let activeChatMode = this.chatMode;
+      let discovery: RuntimeDiscovery | undefined;
+      let shouldStructureDiscovery = false;
+      let runtimeHistory = getSession(sessionId)?.chatHistory ?? session.chatHistory;
 
       if (route.kind === "start_interrogation" || route.kind === "suspect_question") {
         this.chatMode = { mode: "interrogation", suspectId: route.suspect.id, label: route.suspect.name };
         this.enqueueChatMode(this.chatMode, sessionId);
+        activeChatMode = this.chatMode;
         speaker = "suspect";
         suspectId = route.suspect.id;
+        suspect = route.suspect;
         label = route.suspect.name;
         replyText = buildSuspectReply(route.suspect, result.state, result);
       } else {
@@ -292,17 +344,76 @@ export class RoomAgentRuntime {
           this.chatMode = { mode: "assistant", label: "案件 AI 助手" };
           this.enqueueChatMode(this.chatMode, sessionId);
         }
+        activeChatMode = this.chatMode;
+        this.enqueueStatus("正在调取相关记录...", "critical", sessionId);
+        shouldStructureDiscovery = true;
+        runtimeHistory = getSession(sessionId)?.chatHistory ?? session.chatHistory;
         replyText = buildAssistantReply(trimmed, session.caseData, result.state, result);
       }
 
-      this.streamChatMessage({
-        sessionId,
-        turnId,
-        speaker,
-        suspectId,
-        label,
-        text: replyText,
-      });
+      const updatedSessionForPrompt = {
+        ...session,
+        caseData: session.caseData,
+        state: result.state,
+        chatHistory: getSession(sessionId)?.chatHistory ?? session.chatHistory,
+      };
+
+      if (shouldStructureDiscovery && speaker === "assistant") {
+        replyText = await this.streamRuntimeDiscoveryChatMessage({
+          sessionId,
+          turnId,
+          label,
+          fallbackText: replyText,
+          input: trimmed,
+          caseData: session.caseData,
+          history: runtimeHistory,
+          result,
+          state: result.state,
+        });
+        this.enqueueStatus("正在归档本轮发现...", "normal", sessionId);
+        try {
+          discovery = await withTimeout(
+            structureRuntimeDiscoveryFromReply({
+              input: trimmed,
+              reply: replyText,
+              caseData: session.caseData,
+              history: getSession(sessionId)?.chatHistory ?? runtimeHistory,
+              result,
+              state: result.state,
+            }),
+            15000,
+            "动态发现归档超时。",
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "动态发现归档失败。";
+          discovery = createFallbackRuntimeDiscoveryFromReply({
+            input: trimmed,
+            reply: replyText,
+            caseData: session.caseData,
+            state: result.state,
+          });
+          this.enqueueStatus(`本轮回答已完成，已按调查记录归档：${message.slice(0, 80)}`, "normal", sessionId);
+        }
+      } else {
+        await this.streamAiOrFallbackChatMessage({
+          sessionId,
+          turnId,
+          speaker,
+          suspectId,
+          suspect,
+          label,
+          fallbackText: replyText,
+          input: trimmed,
+          session: updatedSessionForPrompt,
+          result,
+          route,
+          chatMode: activeChatMode,
+        });
+      }
+
+      const finalCaseData = discovery?.caseData ?? session.caseData;
+      const finalState = discovery?.state ?? result.state;
+      const finalResultText = replyText || discovery?.reply || result.resultText;
 
       this.enqueue(
         {
@@ -310,15 +421,15 @@ export class RoomAgentRuntime {
           channel: "game",
           payload: {
             sessionId,
-            resultText: result.resultText,
+            resultText: finalResultText,
             parsedAction: result.parsedAction,
-            unlockedEvidence: buildVisibleEvidence(session.caseData, result.state).filter((evidence) =>
+            unlockedEvidence: discovery?.addedEvidence ?? buildVisibleEvidence(finalCaseData, finalState).filter((evidence) =>
               result.unlockedEvidence.some((item) => item.id === evidence.id),
             ),
-            unlockedLocations: buildVisibleLocations(session.caseData, result.state).filter((location) =>
+            unlockedLocations: discovery?.addedLocations ?? buildVisibleLocations(finalCaseData, finalState).filter((location) =>
               result.unlockedLocations.some((item) => item.id === location.id),
             ),
-            unlockedSuspects: buildVisibleSuspects(session.caseData, result.state).filter((suspect) =>
+            unlockedSuspects: discovery?.addedSuspects ?? buildVisibleSuspects(finalCaseData, finalState).filter((suspect) =>
               result.unlockedSuspects.some((item) => item.id === suspect.id),
             ),
           },
@@ -326,7 +437,7 @@ export class RoomAgentRuntime {
         { priority: "critical", sessionId, scope: "action" },
       );
 
-      const statePatch = buildStatePatch(buildPublicState(session.state), buildPublicState(result.state));
+      const statePatch = buildStatePatch(buildPublicState(session.state), buildPublicState(finalState));
       if (hasStatePatch(statePatch)) {
         this.enqueue(
           {
@@ -334,7 +445,7 @@ export class RoomAgentRuntime {
             channel: "game",
             payload: {
               sessionId,
-              resultText: result.resultText,
+              resultText: finalResultText,
               statePatch,
             },
           },
@@ -342,12 +453,21 @@ export class RoomAgentRuntime {
         );
       }
 
-      this.enqueueActionMetadata(session.caseData, session.state, result);
+      this.enqueueActionMetadata(finalCaseData, session.state, {
+        ...result,
+        state: finalState,
+        resultText: finalResultText,
+        unlockedEvidence: result.unlockedEvidence,
+        unlockedLocations: result.unlockedLocations,
+        unlockedSuspects: result.unlockedSuspects,
+      });
+      if (discovery) this.enqueueDiscoveryMetadata(sessionId, discovery);
       const updated = updateSession(sessionId, {
-        state: result.state,
+        caseData: finalCaseData,
+        state: finalState,
       });
 
-      const finalSession = updated ?? { ...session, state: result.state };
+      const finalSession = updated ?? { ...session, caseData: finalCaseData, state: finalState };
       this.enqueueBackgroundMetadata(finalSession);
       this.enqueue(
         {
@@ -355,7 +475,7 @@ export class RoomAgentRuntime {
           channel: "game",
           payload: {
             sessionId,
-            resultText: result.resultText,
+            resultText: finalResultText,
           },
         },
         { priority: "normal", sessionId, scope: "action.finished" },
@@ -431,17 +551,6 @@ export class RoomAgentRuntime {
     );
   }
 
-  private enqueueDelta(text: string, sessionId = this.sessionId) {
-    this.enqueue(
-      {
-        event: "agent.delta",
-        channel: "agent",
-        payload: { text },
-      },
-      { priority: "background", sessionId, scope: "delta" },
-    );
-  }
-
   private enqueueError(message: string, sessionId = this.sessionId) {
     this.enqueue(
       {
@@ -510,6 +619,304 @@ export class RoomAgentRuntime {
       },
       { priority: "normal", sessionId, scope: "chat", delayMs: delayMs + 10 },
     );
+  }
+
+  private async streamFixedChatMessage({
+    label,
+    sessionId = this.sessionId,
+    speaker,
+    suspectId,
+    text,
+    turnId = randomUUID(),
+  }: {
+    label?: string;
+    sessionId?: string;
+    speaker: "assistant" | "suspect" | "system";
+    suspectId?: string;
+    text: string;
+    turnId?: string;
+  }) {
+    const messageId = randomUUID();
+    this.enqueue(
+      {
+        event: "chat.message.started",
+        channel: "agent",
+        payload: { turnId, messageId, speaker, suspectId, label },
+      },
+      { priority: "critical", sessionId, scope: "chat" },
+    );
+
+    for (const chunk of splitTextForStream(text)) {
+      await sleep(16);
+      this.enqueue(
+        {
+          event: "chat.delta",
+          channel: "agent",
+          payload: { turnId, messageId, speaker, suspectId, label, text: chunk },
+        },
+        { priority: "normal", sessionId, scope: "chat.delta" },
+      );
+    }
+
+    this.enqueue(
+      {
+        event: "chat.message.finished",
+        channel: "agent",
+        payload: { turnId, messageId, speaker, suspectId, label, text },
+      },
+      { priority: "normal", sessionId, scope: "chat" },
+    );
+
+    if (sessionId) {
+      appendSessionChatMessage(sessionId, {
+        role: "assistant",
+        speaker,
+        suspectId,
+        label,
+        text,
+      });
+    }
+  }
+
+  private async streamAiOrFallbackChatMessage({
+    chatMode,
+    fallbackText,
+    input,
+    label,
+    result,
+    route,
+    session,
+    sessionId = this.sessionId,
+    speaker,
+    suspect,
+    suspectId,
+    turnId = randomUUID(),
+  }: {
+    chatMode: ChatMode;
+    fallbackText: string;
+    input: string;
+    label?: string;
+    result: ActionResult;
+    route: ChatRoute;
+    session: GameSession;
+    sessionId?: string;
+    speaker: "assistant" | "suspect";
+    suspect?: SuspectProfile;
+    suspectId?: string;
+    turnId?: string;
+  }) {
+    const messageId = randomUUID();
+    let fullText = "";
+    let receivedAiContent = false;
+
+    this.enqueue(
+      {
+        event: "chat.message.started",
+        channel: "agent",
+        payload: { turnId, messageId, speaker, suspectId, label },
+      },
+      { priority: "critical", sessionId, scope: "chat" },
+    );
+
+    let aiBuffer = "";
+    const emitChunk = (text: string) => {
+      if (!text) return;
+      fullText += text;
+      this.enqueue(
+        {
+          event: "chat.delta",
+          channel: "agent",
+          payload: { turnId, messageId, speaker, suspectId, label, text },
+        },
+        { priority: "normal", sessionId, scope: "chat.delta" },
+      );
+    };
+    const flushAiBuffer = () => {
+      if (!aiBuffer) return;
+      const chunk = aiBuffer;
+      aiBuffer = "";
+      emitChunk(chunk);
+    };
+    const emitAiContent = (content: string) => {
+      aiBuffer += content;
+      if (aiBuffer.length >= 14 || /[。！？；，、\n]/.test(content)) {
+        flushAiBuffer();
+      }
+    };
+
+    try {
+      const aiText = await streamAiChatReply({
+        chatMode,
+        fallbackText,
+        input,
+        nextState: result.state,
+        onContent(content) {
+          receivedAiContent = true;
+          emitAiContent(content);
+        },
+        result,
+        route,
+        session,
+        speaker,
+        suspect,
+      });
+      flushAiBuffer();
+
+      if (!receivedAiContent) {
+        for (const chunk of splitTextForStream(aiText)) {
+          emitChunk(chunk);
+          await sleep(12);
+        }
+      }
+    } catch (error) {
+      flushAiBuffer();
+      const message = error instanceof Error ? error.message : "AI 对话生成失败。";
+      if (fullText.trim()) {
+        this.enqueueStatus(`AI 对话流提前结束：${message.slice(0, 80)}`, "normal", sessionId);
+      } else {
+        this.enqueueStatus(`AI 对话暂不可用，已切回本地回复：${message.slice(0, 80)}`, "normal", sessionId);
+        for (const chunk of splitTextForStream(fallbackText)) {
+          emitChunk(chunk);
+          await sleep(12);
+        }
+      }
+    }
+
+    const finalText = fullText.trim() || fallbackText;
+    this.enqueue(
+      {
+        event: "chat.message.finished",
+        channel: "agent",
+        payload: { turnId, messageId, speaker, suspectId, label, text: finalText },
+      },
+      { priority: "normal", sessionId, scope: "chat" },
+    );
+
+    if (sessionId) {
+      appendSessionChatMessage(sessionId, {
+        role: "assistant",
+        speaker,
+        suspectId,
+        label,
+        text: finalText,
+      });
+    }
+  }
+
+  private async streamRuntimeDiscoveryChatMessage({
+    caseData,
+    fallbackText,
+    history,
+    input,
+    label,
+    result,
+    sessionId = this.sessionId,
+    state,
+    turnId = randomUUID(),
+  }: {
+    caseData: CaseData;
+    fallbackText: string;
+    history: GameSession["chatHistory"];
+    input: string;
+    label?: string;
+    result: ActionResult;
+    sessionId?: string;
+    state: PlayerCaseState;
+    turnId?: string;
+  }) {
+    const messageId = randomUUID();
+    let fullText = "";
+    let receivedAiContent = false;
+
+    this.enqueue(
+      {
+        event: "chat.message.started",
+        channel: "agent",
+        payload: { turnId, messageId, speaker: "assistant", label },
+      },
+      { priority: "critical", sessionId, scope: "chat" },
+    );
+
+    let aiBuffer = "";
+    const emitChunk = (text: string) => {
+      if (!text) return;
+      fullText += text;
+      this.enqueue(
+        {
+          event: "chat.delta",
+          channel: "agent",
+          payload: { turnId, messageId, speaker: "assistant", label, text },
+        },
+        { priority: "normal", sessionId, scope: "chat.delta" },
+      );
+    };
+    const flushAiBuffer = () => {
+      if (!aiBuffer) return;
+      const chunk = aiBuffer;
+      aiBuffer = "";
+      emitChunk(chunk);
+    };
+    const emitAiContent = (content: string) => {
+      aiBuffer += content;
+      if (aiBuffer.length >= 10 || /[。！？；，、\n]/.test(content)) {
+        flushAiBuffer();
+      }
+    };
+
+    try {
+      const aiText = await streamRuntimeDiscoveryReply({
+        input,
+        caseData,
+        history,
+        result,
+        state,
+        onContent(content) {
+          receivedAiContent = true;
+          emitAiContent(content);
+        },
+      });
+      flushAiBuffer();
+
+      if (!receivedAiContent) {
+        for (const chunk of splitTextForStream(aiText)) {
+          emitChunk(chunk);
+          await sleep(12);
+        }
+      }
+    } catch (error) {
+      flushAiBuffer();
+      const message = error instanceof Error ? error.message : "AI 调查流生成失败。";
+      if (fullText.trim()) {
+        this.enqueueStatus(`AI 调查流提前结束：${message.slice(0, 80)}`, "normal", sessionId);
+      } else {
+        this.enqueueStatus(`AI 调查暂不可用，已切回本地回复：${message.slice(0, 80)}`, "normal", sessionId);
+        for (const chunk of splitTextForStream(fallbackText)) {
+          emitChunk(chunk);
+          await sleep(12);
+        }
+      }
+    }
+
+    const finalText = fullText.trim() || fallbackText;
+    this.enqueue(
+      {
+        event: "chat.message.finished",
+        channel: "agent",
+        payload: { turnId, messageId, speaker: "assistant", label, text: finalText },
+      },
+      { priority: "normal", sessionId, scope: "chat" },
+    );
+
+    if (sessionId) {
+      appendSessionChatMessage(sessionId, {
+        role: "assistant",
+        speaker: "assistant",
+        label,
+        text: finalText,
+      });
+    }
+
+    return finalText;
   }
 
   private finishTurn(sessionId: string, turnId: string) {
@@ -653,6 +1060,94 @@ export class RoomAgentRuntime {
       priority: "background",
       delayMs: 160,
     });
+  }
+
+  private enqueueDiscoveryMetadata(sessionId: string, discovery: RuntimeDiscovery) {
+    if (discovery.addedEvidence.length) {
+      this.enqueue(
+        {
+          event: "metadata.patch",
+          channel: "metadata",
+          payload: {
+            sessionId,
+            scope: "evidence",
+            mode: "patch",
+            added: buildVisibleEvidence(discovery.caseData, discovery.state).filter((evidence) =>
+              discovery.addedEvidence.some((item) => item.id === evidence.id),
+            ),
+          },
+        },
+        { priority: "critical", sessionId, scope: "evidence.discovery" },
+      );
+    }
+
+    if (discovery.addedLocations.length) {
+      this.enqueue(
+        {
+          event: "metadata.patch",
+          channel: "metadata",
+          payload: {
+            sessionId,
+            scope: "locations",
+            mode: "patch",
+            added: buildVisibleLocations(discovery.caseData, discovery.state).filter((location) =>
+              discovery.addedLocations.some((item) => item.id === location.id),
+            ),
+          },
+        },
+        { priority: "normal", sessionId, scope: "locations.discovery" },
+      );
+    }
+
+    if (discovery.addedSuspects.length) {
+      this.enqueue(
+        {
+          event: "metadata.patch",
+          channel: "metadata",
+          payload: {
+            sessionId,
+            scope: "suspects",
+            mode: "patch",
+            added: buildVisibleSuspects(discovery.caseData, discovery.state).filter((suspect) =>
+              discovery.addedSuspects.some((item) => item.id === suspect.id),
+            ),
+          },
+        },
+        { priority: "normal", sessionId, scope: "suspects.discovery" },
+      );
+    }
+
+    if (discovery.addedTimeline.length) {
+      this.enqueueMetadata(
+        {
+          sessionId,
+          caseData: discovery.caseData,
+          state: discovery.state,
+          chatHistory: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        "timeline",
+        buildVisibleTimeline(discovery.state),
+        { priority: "normal", delayMs: 80 },
+      );
+    }
+
+    if (discovery.addedRelationships.length) {
+      this.enqueueMetadata(
+        {
+          sessionId,
+          caseData: discovery.caseData,
+          state: discovery.state,
+          chatHistory: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        "relationships",
+        buildVisibleRelationships(discovery.caseData, discovery.state),
+        { priority: "normal", delayMs: 120 },
+      );
+    }
   }
 
   private enqueueBackgroundMetadata(session: GameSession) {

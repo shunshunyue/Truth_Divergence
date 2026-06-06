@@ -85,7 +85,7 @@ function schemaContract() {
 }
 
 function generationPrompt() {
-  return `生成一局全新的中文推理游戏案件。不要使用预设案件，不要复用示例内容，不要 markdown。
+  return `生成一局全新的中文推理游戏案件种子。不要使用预设案件，不要复用示例内容，不要 markdown。
 
 硬性要求：
 - 所有案件内容都由你原创生成。
@@ -96,9 +96,17 @@ function generationPrompt() {
 - relationship.type 只能是 normal、conflict、hidden、time、evidence、misleading。
 - relationship.status 只能是 unknown、suspected、conflict、confirmed、excluded、key。
 - timeline.confidence 只能是 confirmed、suspected、disputed。
-- 第一个 location 是开局位置，开局 objects 必须至少 2 个。
-  - 开局不要直接暴露嫌疑人，visibleSuspects 会由系统初始状态隐藏，但 suspects 数据必须完整存在。
-  - truth 里必须指定真凶、动机、手法、关键证据和关键时间线。
+- 这是“Truth Seed + Runtime Discovery”模式：
+  - 你只生成隐藏真相种子、人物池、开局场景和少量可探索入口。
+  - 不要预先生成完整证据库、完整时间线、完整关系图；玩家问什么，运行时 AI 会沿真相种子动态生成证据、地点、人物关系和事件。
+  - evidence 必须返回空数组 []。
+  - timeline 必须返回空数组 []。
+  - relationships 必须返回空数组 []。
+  - locations 只返回 1 个开局地点，objects 生成 3-5 个可探索入口，比如“门岗记录终端”“发电机本体”“湿痕账册”“监控控制台”。这些 object 的 unlocksEvidence/unlocksSuspects/unlocksLocations 全部用 []，运行时再动态追加。
+  - suspects 生成 3-5 个完整隐藏人物种子，其中必须有且只有 1 个 isKiller=true。
+  - witnesses 可生成 1-3 个简短人物种子。
+  - truth 里必须指定 killer、motive、method、deathTime；keyEvidence/keyTimeline 可先返回 []，运行时动态补。
+  - openingEvent.initialPrompt 要鼓励玩家直接问“查进出记录 / 查监控 / 问某人 / 翻账册”，不要写成建议列表。
   - 不要生成页面、HTML 或 aiPage；案件进入游戏后由 WebSocket 对话和左右侧元数据面板呈现。
 
 ${schemaContract()}`;

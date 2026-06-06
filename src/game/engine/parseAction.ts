@@ -8,7 +8,7 @@ const intentKeywords: Array<[ParsedAction["intent"], string[]]> = [
   ["USE_EVIDENCE", ["use", "press", "confront", "用", "拿", "出示", "质问"]],
   ["OPEN_EVIDENCE", ["open", "view", "check", "查看", "打开", "调取"]],
   ["REQUEST_EVIDENCE", ["request", "pull", "retrieve", "调取", "申请"]],
-  ["INVESTIGATE_OBJECT", ["inspect", "investigate", "search", "调查", "检查", "查看"]],
+  ["INVESTIGATE_OBJECT", ["inspect", "investigate", "search", "调查", "检查", "查看", "检修", "维修", "修过", "动过", "记录"]],
   ["BUILD_TIMELINE", ["timeline", "时间线", "轨迹"]],
   ["BUILD_RELATIONSHIP", ["relationship", "关系图", "关系"]],
   ["ASK_ASSISTANT", ["assistant", "hint", "help", "助手", "提示", "帮我"]],
@@ -27,6 +27,13 @@ function findNameMatch(input: string, items: Array<{ id: string; name?: string; 
     const candidates = [item.id, item.name, item.title].filter(Boolean) as string[];
     return candidates.some((candidate) => lowered.includes(normalize(candidate)));
   });
+}
+
+function looksLikeFactFindingQuestion(input: string) {
+  const lowered = normalize(input);
+  return ["谁", "怎么", "为什么", "何时", "什么时候", "哪里", "哪儿", "是否", "有没有", "是不是"].some((keyword) =>
+    lowered.includes(normalize(keyword)),
+  );
 }
 
 export function parseAction(input: string, caseData: CaseData): ParsedAction {
@@ -51,6 +58,7 @@ export function parseAction(input: string, caseData: CaseData): ParsedAction {
     if (targetSuspect) intent = "INTERROGATE_SUSPECT";
     if (targetEvidence) intent = "OPEN_EVIDENCE";
     if (targetLocation) intent = "GO_TO_LOCATION";
+    if (targetObject && looksLikeFactFindingQuestion(input)) intent = "INVESTIGATE_OBJECT";
   }
 
   if (

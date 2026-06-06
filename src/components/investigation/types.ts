@@ -19,6 +19,8 @@ export type InvestigationChatMessage = {
   label?: string;
   suspectId?: string;
   pending?: boolean;
+  placeholder?: boolean;
+  clientPending?: boolean;
   createdAt: number;
 };
 

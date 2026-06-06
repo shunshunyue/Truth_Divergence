@@ -44,6 +44,12 @@ function mentionedSuspect(input: string, caseData: CaseData) {
   );
 }
 
+function mentionedVisibleSuspect(input: string, caseData: CaseData, state: PlayerCaseState) {
+  const suspect = mentionedSuspect(input, caseData);
+  if (!suspect || !state.visibleSuspects.includes(suspect.id)) return undefined;
+  return suspect;
+}
+
 function visibleSuspectById(id: string | undefined, caseData: CaseData, state: PlayerCaseState) {
   if (!id || !state.visibleSuspects.includes(id)) return undefined;
   return caseData.suspects.find((suspect) => suspect.id === id);
@@ -58,7 +64,7 @@ export function routeChatCommand(
 ): ChatRoute {
   const text = normalize(input);
   const hasCaseEntity = Boolean(
-    mentionedSuspect(input, caseData) ||
+    mentionedVisibleSuspect(input, caseData, state) ||
       caseData.evidence.some((item) => text.includes(normalize(item.title)) || text.includes(normalize(item.id))) ||
       caseData.locations.some((item) => text.includes(normalize(item.name)) || text.includes(normalize(item.id))),
   );
@@ -68,10 +74,11 @@ export function routeChatCommand(
   }
 
   if (spoilerPatterns.some((keyword) => text.includes(normalize(keyword)))) {
-    return { kind: "spoiler_request", reason: "我不能替你直接给出嫌疑结论，只能基于已发现证据帮你比较矛盾。" };
+    return { kind: "spoiler_request", reason: "我不能直接替你定嫌疑人，但可以把当前人物按动机、机会和口供矛盾拆开比对。" };
   }
 
-  const suspect = mentionedSuspect(input, caseData) ?? visibleSuspectById(parsedAction.targetSuspect, caseData, state);
+  const suspect =
+    mentionedVisibleSuspect(input, caseData, state) ?? visibleSuspectById(parsedAction.targetSuspect, caseData, state);
   const wantsInterrogation =
     parsedAction.intent === "INTERROGATE_SUSPECT" ||
     text.includes("审问") ||
@@ -115,11 +122,11 @@ export function buildAssistantReply(
   const lines = [
     result.resultText,
     location ? `当前焦点仍在「${location.name}」。` : "",
-    evidence.length ? `最近可用证据：${evidence.join("、")}。` : "证据链还很薄，优先调查当前场景的可疑物件。",
+    evidence.length ? `最近可用材料：${evidence.join("、")}。` : "这条先按待核验线索处理，优先从当前场景的物件和记录来源查起。",
     result.unlockedEvidence.length
       ? `这轮新增了 ${result.unlockedEvidence.length} 份证据，左侧证据索引会同步更新。`
       : "",
-    "你可以继续让我整理时间线、比较口供，或者指定某个人进入问询。",
+    "你可以继续把怀疑点抛出来，我会帮你转成可查的记录、人物或时间线方向。",
   ].filter(Boolean);
 
   if (input.includes("总结") || input.includes("整理")) {
@@ -159,8 +166,8 @@ export function buildSuspectReply(
         : "他的语气还算稳定。";
 
   const evidenceLine = usedEvidenceCount
-    ? "那份证据我看到了，但它不代表你们想证明的全部。"
-    : "如果你们有证据，就直接拿出来。";
+    ? "那份材料我看到了，但它不代表你们想证明的全部。"
+    : "你们要是怀疑我，就把具体记录拿出来问。";
 
   const contradictionLine = contradictions.length
     ? `你们说的矛盾点，我只能解释到这里：${contradictions[contradictions.length - 1]}。`

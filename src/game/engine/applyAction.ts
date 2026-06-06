@@ -103,11 +103,11 @@ function unlockLocations(caseData: CaseData, state: PlayerCaseState) {
 
 function applyInterrogation(caseData: CaseData, state: PlayerCaseState, action: ParsedAction) {
   const suspectId = action.targetSuspect ?? caseData.suspects[0]?.id;
-  if (!suspectId) return "当前没有可审讯的嫌疑人。";
-  if (!state.visibleSuspects.includes(suspectId)) return "这个人还没有进入你的调查视野。需要先从线索或证据中确认其关联。";
+  if (!suspectId) return "这轮问询先作为人物线索记录，需要从现场物件或出入记录里锁定具体对象。";
+  if (!state.visibleSuspects.includes(suspectId)) return "这个人先作为待核验关联对象记录，需要从线索或证据中确认其出场关系。";
 
   const suspect = caseData.suspects.find((item) => item.id === suspectId);
-  if (!suspect) return "指定嫌疑人不在当前案件档案中。";
+  if (!suspect) return "这条人物指向先记为待核验，需要继续比对案件档案和现场记录。";
 
   if (!state.interviewedSuspects.includes(suspectId)) {
     state.interviewedSuspects.push(suspectId);
@@ -138,7 +138,7 @@ function applyUseEvidence(caseData: CaseData, state: PlayerCaseState, action: Pa
   const evidenceId = action.targetEvidence;
 
   if (!suspectId || !evidenceId) {
-    return "使用证据追问需要同时指定嫌疑人和证据。";
+    return "这条追问先记为待核验方向，需要把人物和具体证据对应起来。";
   }
 
   const suspect = caseData.suspects.find((item) => item.id === suspectId);
@@ -146,12 +146,12 @@ function applyUseEvidence(caseData: CaseData, state: PlayerCaseState, action: Pa
   const suspectState = state.suspectStates[suspectId];
 
   if (!suspect || !evidence || !suspectState) {
-    return "当前案件状态下无法使用该嫌疑人或证据。";
+    return "这条人证关系先作为假设保留，需要继续补足人物或证据节点。";
   }
 
   if (!state.discoveredEvidence.includes(evidenceId)) {
     // 玩家不能拿未发现证据追问，这是防止 AI/自然语言越权推进案件的关键规则。
-    return "这份证据尚未被发现。";
+    return "这份材料先作为待调取方向记录，等找到来源或原始记录后再用于追问。";
   }
 
   if (!suspectState.usedEvidenceAgainstThem.includes(evidenceId)) {
@@ -185,11 +185,11 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
     case "GO_TO_LOCATION": {
       const target = parsedAction.targetLocation;
       if (!target) {
-        resultText = "没有识别到明确目的地。";
+        resultText = "这轮地点指向先记为待核验，可以继续补充地点名、区域或出入记录。";
         break;
       }
       if (!state.unlockedLocations.includes(target)) {
-        resultText = "该地点仍被当前案件状态锁定。";
+        resultText = "这个地点先作为待核验去向记录，需要通过当前线索确认进入路径。";
         break;
       }
       state.currentLocation = target;
@@ -205,7 +205,7 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
           input.toLowerCase().replace(/\s+/g, "").includes(object.name.toLowerCase().replace(/\s+/g, "")),
       );
       if (!targetObject && !parsedAction.targetEvidence) {
-        resultText = "没有在当前场景中找到对应线索点。可以先观察场景描述，或点击左侧可调查线索。";
+        resultText = "这条问题先作为待核验线索记录。可以沿当前场景的物件、记录或人员出入继续追。";
         break;
       }
       const targetEvidence = parsedAction.targetEvidence ? [parsedAction.targetEvidence] : [];
@@ -216,7 +216,7 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
       directlyUnlockedLocations = unlockSpecificLocations(caseData, state, targetObject?.unlocksLocations ?? []);
       resultText = unlocked.length
         ? `已解锁证据：${unlocked.map((item) => `「${item.title}」`).join("、")}。`
-        : "这次调查暂时没有产生新的可采证据。";
+        : "这条线索已纳入待核验方向，当前需要继续比对现场物件、记录来源或相关人员口供。";
       if (directlyUnlockedSuspects.length) {
         resultText += ` 新出现可调查对象：${directlyUnlockedSuspects.map((item) => `「${item.name}」`).join("、")}。`;
       }
@@ -227,12 +227,12 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
     }
     case "OPEN_EVIDENCE": {
       if (!parsedAction.targetEvidence) {
-        resultText = "没有识别到明确证据。";
+        resultText = "这轮查看请求先记为待核验材料，需要继续锁定具体记录或物件来源。";
         break;
       }
       resultText = state.discoveredEvidence.includes(parsedAction.targetEvidence)
         ? `已打开「${caseData.evidence.find((item) => item.id === parsedAction.targetEvidence)?.title ?? "证据"}」。`
-        : "这份证据尚未被发现。";
+        : "这份材料先作为待调取方向记录，需要通过现场或人员线索确认来源。";
       break;
     }
     case "INTERROGATE_SUSPECT":
@@ -251,7 +251,9 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
       resultText = `关系图已更新，当前包含 ${state.playerRelationships.length} 条有证据支撑的关系。`;
       break;
     case "ASK_ASSISTANT":
-      resultText = parsedAction.suggestedFallback ?? "副手已就绪。建议优先关注时间戳冲突，以及被证据支撑的口供矛盾。";
+      resultText =
+        parsedAction.suggestedFallback ??
+        "副手已接入。可以把你的问题当成待核验线索，沿时间戳、现场物件、出入记录和口供矛盾继续推进。";
       break;
     case "SUBMIT_DEDUCTION":
       resultText = "最终推理流程已经预留，本阶段暂未提交结算。";
