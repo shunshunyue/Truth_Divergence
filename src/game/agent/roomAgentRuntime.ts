@@ -10,7 +10,7 @@ import {
   type GameSession,
 } from "@/game/engine/sessions";
 import { writeAgentDispatchLog, writeAgentEventLog } from "@/game/agent/eventLog";
-import { streamAiChatReply } from "@/game/agent/aiChatRuntime";
+import { routeChatCommandWithAi, streamAiChatReply } from "@/game/agent/aiChatRuntime";
 import {
   createFallbackRuntimeDiscoveryFromReply,
   streamRuntimeDiscoveryReply,
@@ -58,6 +58,16 @@ type EnqueueOptions = {
   sessionId?: string;
   scope?: string;
   delayMs?: number;
+};
+
+type FinalizeActionOptions = {
+  baseSession: GameSession;
+  caseData: CaseData;
+  discovery?: RuntimeDiscovery;
+  finalState: PlayerCaseState;
+  result: ActionResult;
+  resultText: string;
+  sessionId: string;
 };
 
 function sessionPayload(
@@ -138,8 +148,44 @@ function splitTextForStream(text: string) {
   return chunks;
 }
 
+function sanitizePlayerFacingText(text: string, caseData: CaseData) {
+  let sanitized = text;
+
+  for (const suspect of caseData.suspects) {
+    const escapedId = suspect.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    sanitized = sanitized.replace(new RegExp(`\\b${escapedId}\\b`, "gi"), suspect.name);
+  }
+
+  return sanitized
+    .replace(/\b(?:evidence|timeline|relationship|loc)-[a-z0-9-]+\b/gi, "这条记录")
+    .replace(/\bsuspect-[a-z0-9-]+\b/gi, "相关人员");
+}
+
+function shouldHoldPlayerFacingBuffer(text: string) {
+  return /(?:^|[^a-z0-9-])(?:suspect|evidence|timeline|relationship|loc)-[a-z0-9-]*$/i.test(text);
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldUseRuntimeDiscovery(input: string, result: ActionResult) {
+  const normalized = input.toLowerCase().replace(/\s+/g, "");
+  const discoveryIntents: Array<ActionResult["parsedAction"]["intent"]> = [
+    "INVESTIGATE_OBJECT",
+    "REQUEST_EVIDENCE",
+    "OPEN_EVIDENCE",
+    "GO_TO_LOCATION",
+  ];
+  const asksForMaterial =
+    /查|调取|查看|看一下|翻|检查|调查|打开|读取|核对|记录|日志|监控|录像|门禁|门岗|登记|账册|账本|药箱|物证|证词|口供|鉴定|报告|通话|短信|聊天|定位|票据|收据|小票|指纹|血迹|痕迹|控制台/.test(
+      normalized,
+    );
+  const asksForThinkingOnly =
+    /总结|整理|复盘|分析|建议|下一步|方向|怎么看|怎么想|推理一下|帮我想|怀疑谁|可疑/.test(normalized) &&
+    !/查|调取|查看|翻|检查|调查|记录|日志|监控|门禁|账册|物证|证词|口供/.test(normalized);
+
+  return !asksForThinkingOnly && (discoveryIntents.includes(result.parsedAction.intent) || asksForMaterial);
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -281,7 +327,15 @@ export class RoomAgentRuntime {
       const turnId = randomUUID();
       this.enqueueStatus("正在理解你的问题...", "critical", sessionId);
       const result = applyAction(trimmed, session.caseData, session.state);
-      const route = routeChatCommand(trimmed, session.caseData, result.state, this.chatMode, result.parsedAction);
+      const localRoute = routeChatCommand(trimmed, session.caseData, result.state, this.chatMode, result.parsedAction);
+      const route = await routeChatCommandWithAi({
+        input: trimmed,
+        session,
+        nextState: result.state,
+        result,
+        currentMode: this.chatMode,
+        fallbackRoute: localRoute,
+      });
       appendSessionChatMessage(sessionId, {
         role: "user",
         speaker: "user",
@@ -340,13 +394,13 @@ export class RoomAgentRuntime {
         label = route.suspect.name;
         replyText = buildSuspectReply(route.suspect, result.state, result);
       } else {
-        if (this.chatMode.mode !== "assistant" && result.parsedAction.intent === "ASK_ASSISTANT") {
+        if (this.chatMode.mode !== "assistant") {
           this.chatMode = { mode: "assistant", label: "案件 AI 助手" };
           this.enqueueChatMode(this.chatMode, sessionId);
         }
         activeChatMode = this.chatMode;
-        this.enqueueStatus("正在调取相关记录...", "critical", sessionId);
-        shouldStructureDiscovery = true;
+        shouldStructureDiscovery = shouldUseRuntimeDiscovery(trimmed, result);
+        this.enqueueStatus(shouldStructureDiscovery ? "正在调取相关记录..." : "正在整理线索...", "critical", sessionId);
         runtimeHistory = getSession(sessionId)?.chatHistory ?? session.chatHistory;
         replyText = buildAssistantReply(trimmed, session.caseData, result.state, result);
       }
@@ -370,30 +424,52 @@ export class RoomAgentRuntime {
           result,
           state: result.state,
         });
-        this.enqueueStatus("正在归档本轮发现...", "normal", sessionId);
-        try {
-          discovery = await withTimeout(
-            structureRuntimeDiscoveryFromReply({
-              input: trimmed,
-              reply: replyText,
-              caseData: session.caseData,
-              history: getSession(sessionId)?.chatHistory ?? runtimeHistory,
-              result,
-              state: result.state,
-            }),
-            15000,
-            "动态发现归档超时。",
-          );
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "动态发现归档失败。";
-          discovery = createFallbackRuntimeDiscoveryFromReply({
-            input: trimmed,
-            reply: replyText,
-            caseData: session.caseData,
-            state: result.state,
-          });
-          this.enqueueStatus(`本轮回答已完成，已按调查记录归档：${message.slice(0, 80)}`, "normal", sessionId);
-        }
+        discovery = createFallbackRuntimeDiscoveryFromReply({
+          input: trimmed,
+          reply: replyText,
+          caseData: session.caseData,
+          state: result.state,
+        });
+        const finalCaseData = discovery.caseData;
+        const finalState = discovery.state;
+        const finalResultText = replyText || discovery.reply || result.resultText;
+        const finalSession = this.finalizeAction({
+          baseSession: session,
+          caseData: finalCaseData,
+          discovery,
+          finalState,
+          result,
+          resultText: finalResultText,
+          sessionId,
+        });
+        this.enqueue(
+          {
+            event: "game.command.finished",
+            channel: "game",
+            payload: {
+              sessionId,
+              resultText: finalResultText,
+            },
+          },
+          { priority: "critical", sessionId, scope: "action.finished" },
+        );
+        this.finishTurn(sessionId, turnId);
+        this.running = false;
+        this.structureDiscoveryInBackground({
+          input: trimmed,
+          reply: replyText,
+          caseData: finalCaseData,
+          history: getSession(sessionId)?.chatHistory ?? runtimeHistory,
+          result: {
+            ...result,
+            state: finalState,
+          },
+          sessionId,
+          state: finalState,
+          fallbackDiscovery: discovery,
+        });
+        this.scheduleIdleHint(finalSession);
+        return;
       } else {
         await this.streamAiOrFallbackChatMessage({
           sessionId,
@@ -414,61 +490,15 @@ export class RoomAgentRuntime {
       const finalCaseData = discovery?.caseData ?? session.caseData;
       const finalState = discovery?.state ?? result.state;
       const finalResultText = replyText || discovery?.reply || result.resultText;
-
-      this.enqueue(
-        {
-          event: "game.action.result",
-          channel: "game",
-          payload: {
-            sessionId,
-            resultText: finalResultText,
-            parsedAction: result.parsedAction,
-            unlockedEvidence: discovery?.addedEvidence ?? buildVisibleEvidence(finalCaseData, finalState).filter((evidence) =>
-              result.unlockedEvidence.some((item) => item.id === evidence.id),
-            ),
-            unlockedLocations: discovery?.addedLocations ?? buildVisibleLocations(finalCaseData, finalState).filter((location) =>
-              result.unlockedLocations.some((item) => item.id === location.id),
-            ),
-            unlockedSuspects: discovery?.addedSuspects ?? buildVisibleSuspects(finalCaseData, finalState).filter((suspect) =>
-              result.unlockedSuspects.some((item) => item.id === suspect.id),
-            ),
-          },
-        },
-        { priority: "critical", sessionId, scope: "action" },
-      );
-
-      const statePatch = buildStatePatch(buildPublicState(session.state), buildPublicState(finalState));
-      if (hasStatePatch(statePatch)) {
-        this.enqueue(
-          {
-            event: "game.state.patch",
-            channel: "game",
-            payload: {
-              sessionId,
-              resultText: finalResultText,
-              statePatch,
-            },
-          },
-          { priority: "critical", sessionId, scope: "state" },
-        );
-      }
-
-      this.enqueueActionMetadata(finalCaseData, session.state, {
-        ...result,
-        state: finalState,
-        resultText: finalResultText,
-        unlockedEvidence: result.unlockedEvidence,
-        unlockedLocations: result.unlockedLocations,
-        unlockedSuspects: result.unlockedSuspects,
-      });
-      if (discovery) this.enqueueDiscoveryMetadata(sessionId, discovery);
-      const updated = updateSession(sessionId, {
+      const finalSession = this.finalizeAction({
+        baseSession: session,
         caseData: finalCaseData,
-        state: finalState,
+        discovery,
+        finalState,
+        result,
+        resultText: finalResultText,
+        sessionId,
       });
-
-      const finalSession = updated ?? { ...session, caseData: finalCaseData, state: finalState };
-      this.enqueueBackgroundMetadata(finalSession);
       this.enqueue(
         {
           event: "game.command.finished",
@@ -516,6 +546,262 @@ export class RoomAgentRuntime {
     writeAgentEventLog(envelope);
     this.scheduleFlush();
     return envelope;
+  }
+
+  private finalizeAction({
+    baseSession,
+    caseData,
+    discovery,
+    finalState,
+    result,
+    resultText,
+    sessionId,
+  }: FinalizeActionOptions) {
+    this.enqueue(
+      {
+        event: "game.action.result",
+        channel: "game",
+        payload: {
+          sessionId,
+          resultText,
+          parsedAction: result.parsedAction,
+          unlockedEvidence: discovery?.addedEvidence ?? buildVisibleEvidence(caseData, finalState).filter((evidence) =>
+            result.unlockedEvidence.some((item) => item.id === evidence.id),
+          ),
+          unlockedLocations: discovery?.addedLocations ?? buildVisibleLocations(caseData, finalState).filter((location) =>
+            result.unlockedLocations.some((item) => item.id === location.id),
+          ),
+          unlockedSuspects: discovery?.addedSuspects ?? buildVisibleSuspects(caseData, finalState).filter((suspect) =>
+            result.unlockedSuspects.some((item) => item.id === suspect.id),
+          ),
+        },
+      },
+      { priority: "critical", sessionId, scope: "action" },
+    );
+
+    const statePatch = buildStatePatch(buildPublicState(baseSession.state), buildPublicState(finalState));
+    if (hasStatePatch(statePatch)) {
+      this.enqueue(
+        {
+          event: "game.state.patch",
+          channel: "game",
+          payload: {
+            sessionId,
+            resultText,
+            statePatch,
+          },
+        },
+        { priority: "critical", sessionId, scope: "state" },
+      );
+    }
+
+    this.enqueueActionMetadata(caseData, baseSession.state, {
+      ...result,
+      state: finalState,
+      resultText,
+      unlockedEvidence: result.unlockedEvidence,
+      unlockedLocations: result.unlockedLocations,
+      unlockedSuspects: result.unlockedSuspects,
+    });
+    if (discovery) this.enqueueDiscoveryMetadata(sessionId, discovery);
+
+    const updated = updateSession(sessionId, {
+      caseData,
+      state: finalState,
+    });
+    const finalSession = updated ?? { ...baseSession, caseData, state: finalState };
+    this.enqueueBackgroundMetadata(finalSession);
+    return finalSession;
+  }
+
+  private structureDiscoveryInBackground({
+    caseData,
+    fallbackDiscovery,
+    history,
+    input,
+    reply,
+    result,
+    sessionId,
+    state,
+  }: {
+    caseData: CaseData;
+    fallbackDiscovery: RuntimeDiscovery;
+    history: GameSession["chatHistory"];
+    input: string;
+    reply: string;
+    result: ActionResult;
+    sessionId: string;
+    state: PlayerCaseState;
+  }) {
+    void (async () => {
+      try {
+        this.enqueueStatus("正在补全本轮发现的归档...", "background", sessionId);
+        const discovery = await withTimeout(
+          structureRuntimeDiscoveryFromReply({
+            input,
+            reply,
+            caseData,
+            history,
+            result,
+            state,
+          }),
+          15000,
+          "动态发现归档超时。",
+        );
+
+        const latest = getSession(sessionId);
+        if (!latest) return;
+
+        const fallbackEvidenceIds = new Set(fallbackDiscovery.addedEvidence.map((item) => item.id));
+        const fallbackLocationIds = new Set(fallbackDiscovery.addedLocations.map((item) => item.id));
+        const fallbackSuspectIds = new Set(fallbackDiscovery.addedSuspects.map((item) => item.id));
+        const fallbackTimelineIds = new Set(fallbackDiscovery.addedTimeline.map((item) => item.id));
+        const fallbackRelationshipIds = new Set(fallbackDiscovery.addedRelationships.map((item) => item.id));
+        const mergedTruth = {
+          ...latest.caseData.truth,
+          keyEvidence: Array.from(new Set([...latest.caseData.truth.keyEvidence, ...discovery.caseData.truth.keyEvidence])),
+          keyTimeline: Array.from(new Set([...latest.caseData.truth.keyTimeline, ...discovery.caseData.truth.keyTimeline])),
+        };
+        const mergedCaseData: CaseData = {
+          ...latest.caseData,
+          evidence: [
+            ...latest.caseData.evidence.filter((item) => !(discovery.addedEvidence.length && fallbackEvidenceIds.has(item.id))),
+            ...discovery.addedEvidence.filter((item) => !latest.caseData.evidence.some((existing) => existing.id === item.id)),
+          ],
+          locations: [
+            ...latest.caseData.locations.filter((item) => !(discovery.addedLocations.length && fallbackLocationIds.has(item.id))),
+            ...discovery.addedLocations.filter((item) => !latest.caseData.locations.some((existing) => existing.id === item.id)),
+          ],
+          suspects: [
+            ...latest.caseData.suspects.filter((item) => !(discovery.addedSuspects.length && fallbackSuspectIds.has(item.id))),
+            ...discovery.addedSuspects.filter((item) => !latest.caseData.suspects.some((existing) => existing.id === item.id)),
+          ],
+          timeline: [
+            ...latest.caseData.timeline.filter((item) => !(discovery.addedTimeline.length && fallbackTimelineIds.has(item.id))),
+            ...discovery.addedTimeline.filter((item) => !latest.caseData.timeline.some((existing) => existing.id === item.id)),
+          ],
+          relationships: [
+            ...latest.caseData.relationships.filter((item) => !(discovery.addedRelationships.length && fallbackRelationshipIds.has(item.id))),
+            ...discovery.addedRelationships.filter((item) => !latest.caseData.relationships.some((existing) => existing.id === item.id)),
+          ],
+          truth: mergedTruth,
+        };
+        const mergedState: PlayerCaseState = {
+          ...latest.state,
+          discoveredEvidence: Array.from(
+            new Set([
+              ...latest.state.discoveredEvidence.filter((id) => !(discovery.addedEvidence.length && fallbackEvidenceIds.has(id))),
+              ...discovery.addedEvidence.map((item) => item.id),
+            ]),
+          ),
+          unlockedLocations: Array.from(
+            new Set([
+              ...latest.state.unlockedLocations.filter((id) => !(discovery.addedLocations.length && fallbackLocationIds.has(id))),
+              ...discovery.addedLocations.map((item) => item.id),
+            ]),
+          ),
+          visibleSuspects: Array.from(
+            new Set([
+              ...latest.state.visibleSuspects.filter((id) => !(discovery.addedSuspects.length && fallbackSuspectIds.has(id))),
+              ...discovery.addedSuspects.map((item) => item.id),
+              ...discovery.addedEvidence.flatMap((item) => item.relatedSuspects),
+              ...discovery.addedTimeline.flatMap((item) => item.relatedSuspects),
+              ...discovery.addedRelationships.flatMap((item) => [item.from, item.to]),
+            ].filter((id) => mergedCaseData.suspects.some((suspect) => suspect.id === id))),
+          ),
+          playerTimeline: [
+            ...latest.state.playerTimeline.filter((item) => !(discovery.addedTimeline.length && fallbackTimelineIds.has(item.id))),
+            ...discovery.addedTimeline.filter((item) => !latest.state.playerTimeline.some((existing) => existing.id === item.id)),
+          ],
+          playerRelationships: [
+            ...latest.state.playerRelationships.filter((item) => !(discovery.addedRelationships.length && fallbackRelationshipIds.has(item.id))),
+            ...discovery.addedRelationships.filter((item) => !latest.state.playerRelationships.some((existing) => existing.id === item.id)),
+          ],
+          notes: Array.from(new Set([...latest.state.notes, ...discovery.notes])).slice(-20),
+        };
+
+        updateSession(sessionId, {
+          caseData: mergedCaseData,
+          state: mergedState,
+        });
+        this.enqueueRuntimeDiscoveryReplacement(sessionId, fallbackDiscovery, discovery);
+        this.enqueueDiscoveryMetadata(sessionId, {
+          ...discovery,
+          caseData: mergedCaseData,
+          state: mergedState,
+        });
+        const statePatch = buildStatePatch(buildPublicState(latest.state), buildPublicState(mergedState));
+        if (hasStatePatch(statePatch)) {
+          this.enqueue(
+            {
+              event: "game.state.patch",
+              channel: "game",
+              payload: {
+                sessionId,
+                resultText: reply,
+                statePatch,
+              },
+            },
+            { priority: "background", sessionId, scope: "state.discovery" },
+          );
+        }
+        this.enqueueBackgroundMetadata({ ...latest, caseData: mergedCaseData, state: mergedState });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "动态发现归档失败。";
+        this.enqueueStatus(`本轮发现已先粗归档，精细归档稍后可重试：${message.slice(0, 80)}`, "background", sessionId);
+        this.enqueueDiscoveryMetadata(sessionId, fallbackDiscovery);
+      }
+    })();
+  }
+
+  private enqueueRuntimeDiscoveryReplacement(sessionId: string, fallbackDiscovery: RuntimeDiscovery, discovery: RuntimeDiscovery) {
+    if (fallbackDiscovery.addedEvidence.length && discovery.addedEvidence.length) {
+      this.enqueue(
+        {
+          event: "metadata.patch",
+          channel: "metadata",
+          payload: {
+            sessionId,
+            scope: "evidence",
+            mode: "patch",
+            removedIds: fallbackDiscovery.addedEvidence.map((item) => item.id),
+          },
+        },
+        { priority: "background", sessionId, scope: "evidence.discovery.replace" },
+      );
+    }
+
+    if (fallbackDiscovery.addedLocations.length && discovery.addedLocations.length) {
+      this.enqueue(
+        {
+          event: "metadata.patch",
+          channel: "metadata",
+          payload: {
+            sessionId,
+            scope: "locations",
+            mode: "patch",
+            removedIds: fallbackDiscovery.addedLocations.map((item) => item.id),
+          },
+        },
+        { priority: "background", sessionId, scope: "locations.discovery.replace" },
+      );
+    }
+
+    if (fallbackDiscovery.addedSuspects.length && discovery.addedSuspects.length) {
+      this.enqueue(
+        {
+          event: "metadata.patch",
+          channel: "metadata",
+          payload: {
+            sessionId,
+            scope: "suspects",
+            mode: "patch",
+            removedIds: fallbackDiscovery.addedSuspects.map((item) => item.id),
+          },
+        },
+        { priority: "background", sessionId, scope: "suspects.discovery.replace" },
+      );
+    }
   }
 
   private scheduleFlush() {
@@ -720,13 +1006,14 @@ export class RoomAgentRuntime {
 
     let aiBuffer = "";
     const emitChunk = (text: string) => {
-      if (!text) return;
-      fullText += text;
+      const sanitizedText = sanitizePlayerFacingText(text, session.caseData);
+      if (!sanitizedText) return;
+      fullText += sanitizedText;
       this.enqueue(
         {
           event: "chat.delta",
           channel: "agent",
-          payload: { turnId, messageId, speaker, suspectId, label, text },
+          payload: { turnId, messageId, speaker, suspectId, label, text: sanitizedText },
         },
         { priority: "normal", sessionId, scope: "chat.delta" },
       );
@@ -739,7 +1026,7 @@ export class RoomAgentRuntime {
     };
     const emitAiContent = (content: string) => {
       aiBuffer += content;
-      if (aiBuffer.length >= 14 || /[。！？；，、\n]/.test(content)) {
+      if (!shouldHoldPlayerFacingBuffer(aiBuffer) && (aiBuffer.length >= 14 || /[。！？；，、\n]/.test(content))) {
         flushAiBuffer();
       }
     };
@@ -782,7 +1069,7 @@ export class RoomAgentRuntime {
       }
     }
 
-    const finalText = fullText.trim() || fallbackText;
+    const finalText = sanitizePlayerFacingText(fullText.trim() || fallbackText, session.caseData);
     this.enqueue(
       {
         event: "chat.message.finished",
@@ -839,13 +1126,14 @@ export class RoomAgentRuntime {
 
     let aiBuffer = "";
     const emitChunk = (text: string) => {
-      if (!text) return;
-      fullText += text;
+      const sanitizedText = sanitizePlayerFacingText(text, caseData);
+      if (!sanitizedText) return;
+      fullText += sanitizedText;
       this.enqueue(
         {
           event: "chat.delta",
           channel: "agent",
-          payload: { turnId, messageId, speaker: "assistant", label, text },
+          payload: { turnId, messageId, speaker: "assistant", label, text: sanitizedText },
         },
         { priority: "normal", sessionId, scope: "chat.delta" },
       );
@@ -858,7 +1146,7 @@ export class RoomAgentRuntime {
     };
     const emitAiContent = (content: string) => {
       aiBuffer += content;
-      if (aiBuffer.length >= 10 || /[。！？；，、\n]/.test(content)) {
+      if (!shouldHoldPlayerFacingBuffer(aiBuffer) && (aiBuffer.length >= 10 || /[。！？；，、\n]/.test(content))) {
         flushAiBuffer();
       }
     };
@@ -897,7 +1185,7 @@ export class RoomAgentRuntime {
       }
     }
 
-    const finalText = fullText.trim() || fallbackText;
+    const finalText = sanitizePlayerFacingText(fullText.trim() || fallbackText, caseData);
     this.enqueue(
       {
         event: "chat.message.finished",
@@ -1099,7 +1387,7 @@ export class RoomAgentRuntime {
       );
     }
 
-    if (discovery.addedSuspects.length) {
+    if (discovery.state.visibleSuspects.length) {
       this.enqueue(
         {
           event: "metadata.patch",
@@ -1108,9 +1396,7 @@ export class RoomAgentRuntime {
             sessionId,
             scope: "suspects",
             mode: "patch",
-            added: buildVisibleSuspects(discovery.caseData, discovery.state).filter((suspect) =>
-              discovery.addedSuspects.some((item) => item.id === suspect.id),
-            ),
+            added: buildVisibleSuspects(discovery.caseData, discovery.state),
           },
         },
         { priority: "normal", sessionId, scope: "suspects.discovery" },
@@ -1180,7 +1466,7 @@ export class RoomAgentRuntime {
           event: "agent.hint",
           channel: "agent",
           payload: {
-            text: commands[0] ? `可以尝试：${commands[0]}` : "可以整理时间线，看看已知事件是否互相冲突。",
+            text: "我先停在这里，你继续按你想追的点问。",
             commands,
           },
         },

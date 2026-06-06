@@ -18,6 +18,16 @@ import {
   type SessionPayload,
 } from "@/components/investigation/types";
 
+const simulatedBootTimeline: Array<{ step: BootStepId; progress: number; status: string; delay: number }> = [
+  { step: "core", progress: 18, status: "缓存命中，正在核对案件核心...", delay: 180 },
+  { step: "scene", progress: 34, status: "正在装配初始现场和可调查区域...", delay: 360 },
+  { step: "clues", progress: 50, status: "正在展开现场线索入口...", delay: 560 },
+  { step: "evidence", progress: 66, status: "正在同步证据索引和解锁条件...", delay: 780 },
+  { step: "agent", progress: 82, status: "正在接入问询路由和评分循环...", delay: 1040 },
+  { step: "chat", progress: 96, status: "正在接通案件问答中枢...", delay: 1320 },
+  { step: "chat", progress: 100, status: "案件领取完毕。", delay: 1640 },
+];
+
 function stepFromStatus(text: string): BootStepId {
   if (text.includes("对话") || text.includes("问答") || text.includes("聊天")) return "chat";
   if (text.includes("Agent") || text.includes("AI")) return "agent";
@@ -143,6 +153,8 @@ function mergeStatePatch(current: PlayerCaseState, patch: AgentPlayerStatePatch)
 export function useInvestigationSession() {
   const socketRef = useRef<ReturnType<typeof connectAgentSocket> | null>(null);
   const sessionRef = useRef<SessionPayload | null>(null);
+  const pendingSessionRef = useRef<SessionPayload | null>(null);
+  const bootTimersRef = useRef<number[]>([]);
   const startSentRef = useRef(false);
   const seenEventIdsRef = useRef<Set<string>>(new Set());
   const roomIdRef = useRef(`room-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`);
@@ -152,6 +164,7 @@ export function useInvestigationSession() {
   const [bootProgress, setBootProgress] = useState(8);
   const [activeBootStep, setActiveBootStep] = useState<BootStepId>("core");
   const [bootError, setBootError] = useState("");
+  const [bootReleased, setBootReleased] = useState(false);
   const [showBriefing, setShowBriefing] = useState(false);
   const [isActing, setIsActing] = useState(false);
   const [actionStatus, setActionStatus] = useState("等待调查指令。");
@@ -167,12 +180,52 @@ export function useInvestigationSession() {
       setSession(nextSession);
     }
 
+    function clearBootTimers() {
+      for (const timer of bootTimersRef.current) window.clearTimeout(timer);
+      bootTimersRef.current = [];
+    }
+
+    function releasePendingSession() {
+      const pendingSession = pendingSessionRef.current;
+      if (!pendingSession || cancelled) return;
+
+      pendingSessionRef.current = null;
+      setShowBriefing(true);
+      setBootReleased(true);
+      commitSession(pendingSession);
+    }
+
+    function playCachedBootSequence(nextSession: SessionPayload) {
+      pendingSessionRef.current = nextSession;
+      clearBootTimers();
+
+      for (const item of simulatedBootTimeline) {
+        const timer = window.setTimeout(() => {
+          if (cancelled) return;
+          setActiveBootStep((current) => {
+            const currentIndex = bootSteps.findIndex((step) => step.id === current);
+            const nextIndex = bootSteps.findIndex((step) => step.id === item.step);
+            return nextIndex >= currentIndex ? item.step : current;
+          });
+          setBootProgress((current) => Math.max(current, item.progress));
+          setBootStatus(item.status);
+          if (item.progress === 100) releasePendingSession();
+        }, item.delay);
+        bootTimersRef.current.push(timer);
+      }
+    }
+
     function mergeSession(updater: (current: SessionPayload) => SessionPayload) {
       setSession((current) => {
-        const base = current ?? sessionRef.current;
+        const base = current ?? sessionRef.current ?? pendingSessionRef.current;
         if (!base) return current;
 
         const nextSession = updater(base);
+        if (pendingSessionRef.current && !current && !sessionRef.current) {
+          pendingSessionRef.current = nextSession;
+          return current;
+        }
+
         sessionRef.current = nextSession;
         return nextSession;
       });
@@ -219,16 +272,16 @@ export function useInvestigationSession() {
 
       if (event === "agent.status") {
         const text = envelope.payload.text;
-        if (!sessionRef.current) {
+        if (!sessionRef.current && !pendingSessionRef.current) {
           setBootStatus(text);
           setActiveBootStep(stepFromStatus(text));
           setBootProgress((current) => clampBootProgress(current + 12));
         } else {
-          setActionStatus(text);
+          if (envelope.priority !== "background") setActionStatus(text);
         }
       }
 
-      if (event === "agent.delta" && !sessionRef.current) {
+      if (event === "agent.delta" && !sessionRef.current && !pendingSessionRef.current) {
         deltaCount += 1;
         const stepIndex = Math.min(bootSteps.length - 1, Math.floor(deltaCount / 12));
         setActiveBootStep(bootSteps[stepIndex]?.id ?? "chat");
@@ -305,17 +358,13 @@ export function useInvestigationSession() {
           clientPending: false,
           createdAt: Date.now(),
         });
+        if (envelope.payload.speaker === "assistant" || envelope.payload.speaker === "suspect") {
+          setIsActing(false);
+        }
       }
 
       if (event === "session.ready") {
-        setActiveBootStep("chat");
-        setBootProgress(100);
-        setBootStatus("案件领取完毕。");
-        commitSession(envelope.payload);
-        window.setTimeout(() => {
-          if (cancelled) return;
-          setShowBriefing(true);
-        }, 300);
+        playCachedBootSequence(envelope.payload);
       }
 
       if (event === "game.action.result") {
@@ -380,6 +429,7 @@ export function useInvestigationSession() {
 
     return () => {
       cancelled = true;
+      clearBootTimers();
       socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
@@ -480,7 +530,7 @@ export function useInvestigationSession() {
     bootStatus,
     data,
     isActing,
-    isBooting: !session,
+    isBooting: !bootReleased,
     session,
     setShowBriefing,
     showBriefing,

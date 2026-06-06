@@ -10,7 +10,7 @@ const intentKeywords: Array<[ParsedAction["intent"], string[]]> = [
   ["REQUEST_EVIDENCE", ["request", "pull", "retrieve", "调取", "申请"]],
   ["INVESTIGATE_OBJECT", ["inspect", "investigate", "search", "调查", "检查", "查看", "检修", "维修", "修过", "动过", "记录"]],
   ["BUILD_TIMELINE", ["timeline", "时间线", "轨迹"]],
-  ["BUILD_RELATIONSHIP", ["relationship", "关系图", "关系"]],
+  ["BUILD_RELATIONSHIP", ["relationship", "关系图", "关系线", "关系网", "人物关系", "整理关系", "梳理关系"]],
   ["ASK_ASSISTANT", ["assistant", "hint", "help", "助手", "提示", "帮我"]],
   ["SUBMIT_DEDUCTION", ["submit", "deduction", "truth", "提交", "推理", "真凶"]],
 ];

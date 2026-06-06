@@ -13,7 +13,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { BootConsole } from "@/components/investigation/BootConsole";
 import {
   bootSteps,
@@ -23,7 +23,7 @@ import {
   type InvestigationChatMessage,
   type InvestigationData,
 } from "@/components/investigation/types";
-import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
+import type { CaseData, PlayerCaseState, SuspectState } from "@/game/schemas/game";
 
 const emotionLabels: Record<string, string> = {
   calm: "冷静",
@@ -54,6 +54,34 @@ function shortText(value: string | undefined, max = 34) {
   return value.length > max ? `${value.slice(0, max)}...` : value;
 }
 
+function usePrevious<T>(value: T) {
+  const ref = useRef<T>(value);
+
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+
+  return ref.current;
+}
+
+function usePulseFlag(trigger: unknown, duration = 900) {
+  const [active, setActive] = useState(false);
+  const mounted = useRef(false);
+
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+
+    setActive(true);
+    const timer = setTimeout(() => setActive(false), duration);
+    return () => clearTimeout(timer);
+  }, [trigger, duration]);
+
+  return active;
+}
+
 export function LeftDrawer({
   data,
   isActing,
@@ -74,22 +102,28 @@ export function LeftDrawer({
   const clueCount = data?.availableClues.length ?? 0;
   const evidenceCount = data?.discoveredEvidence.length ?? 0;
   const drawerReady = !isBooting && data;
+  const locationPulse = usePulseFlag(locationCount, 780);
+  const cluePulse = usePulseFlag(clueCount, 780);
+  const evidencePulse = usePulseFlag(evidenceCount, 920);
 
   return (
     <div className="relative flex h-full flex-col">
       {/* Icon strip */}
       <div className="flex w-12 flex-col items-center gap-1 border-r border-[#d8cfba] bg-[#ede8dc] pt-3">
         {[
-          { section: "locations" as const, Icon: MapPin, count: locationCount, active: data?.currentLocation != null },
-          { section: "clues" as const, Icon: Search, count: clueCount, active: false },
-          { section: "evidence" as const, Icon: Fingerprint, count: evidenceCount, active: false },
-        ].map(({ section, Icon, count }) => (
-          <button
+          { section: "locations" as const, Icon: MapPin, count: locationCount, active: data?.currentLocation != null, pulse: locationPulse },
+          { section: "clues" as const, Icon: Search, count: clueCount, active: false, pulse: cluePulse },
+          { section: "evidence" as const, Icon: Fingerprint, count: evidenceCount, active: false, pulse: evidencePulse },
+        ].map(({ section, Icon, count, pulse }) => (
+          <motion.button
             key={section}
             className={[
               "relative flex h-10 w-10 items-center justify-center transition",
+              pulse ? "td-divergence" : "",
               open === section ? "text-[#24615b]" : "text-[#8b8171] hover:text-[#9d6d21]",
             ].join(" ")}
+            animate={pulse ? { scale: [1, 1.22, 1], rotate: [0, -3, 2, 0] } : { scale: 1, rotate: 0 }}
+            transition={{ duration: 0.42, ease: "easeOut" }}
             onClick={() => {
               const next = open === section ? null : section;
               setOpen(next);
@@ -99,11 +133,17 @@ export function LeftDrawer({
           >
             <Icon size={18} />
             {count > 0 && (
-              <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center bg-[#24615b] px-0.5 font-mono text-[0.55rem] font-bold text-[#eafffb]">
+              <motion.span
+                key={count}
+                className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center bg-[#24615b] px-0.5 font-mono text-[0.55rem] font-bold text-[#eafffb]"
+                initial={{ scale: 0.72, y: -2 }}
+                animate={{ scale: 1, y: 0 }}
+                transition={{ duration: 0.18 }}
+              >
                 {count}
-              </span>
+              </motion.span>
             )}
-          </button>
+          </motion.button>
         ))}
       </div>
 
@@ -235,8 +275,18 @@ export function LeftDrawer({
 
       {/* Clue detail modal */}
       {selectedClue && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur" onClick={() => setSelectedClue(null)}>
-          <div className="w-full max-w-sm border border-[#b8d8d2] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+        <motion.div
+          className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          onClick={() => setSelectedClue(null)}
+        >
+          <motion.div
+            className="w-full max-w-sm border border-[#b8d8d2] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]"
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
             <div className="mb-3 flex items-center justify-between">
               <span className="font-mono text-[0.65rem] text-[#24615b]">场景线索</span>
               <button onClick={() => setSelectedClue(null)} type="button" className="text-[#8b8171] hover:text-[#9d6d21]"><X size={13} /></button>
@@ -250,14 +300,24 @@ export function LeftDrawer({
             >
               <Search size={13} /> 调查此线索
             </button>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
 
       {/* Location detail modal */}
       {selectedLocation && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur" onClick={() => setSelectedLocation(null)}>
-          <div className="w-full max-w-sm border border-[#b8d8d2] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+        <motion.div
+          className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          onClick={() => setSelectedLocation(null)}
+        >
+          <motion.div
+            className="w-full max-w-sm border border-[#b8d8d2] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]"
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
             <div className="mb-3 flex items-center justify-between">
               <span className="font-mono text-[0.65rem] text-[#24615b]">{selectedLocation.kind}</span>
               <button onClick={() => setSelectedLocation(null)} type="button" className="text-[#8b8171] hover:text-[#9d6d21]"><X size={13} /></button>
@@ -283,14 +343,35 @@ export function LeftDrawer({
                 <MapPin size={13} /> 前往此地点
               </button>
             )}
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
 
       {/* Evidence detail modal */}
       {selectedEvidence && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur" onClick={() => setSelectedEvidence(null)}>
-          <div className="w-full max-w-sm border border-[#cfa65b] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+        <motion.div
+          className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          onClick={() => setSelectedEvidence(null)}
+        >
+          <motion.div
+            className={[
+              "relative w-full max-w-sm overflow-hidden border border-[#cfa65b] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]",
+              selectedEvidence.reliability === "low" ? "td-noise td-divergence" : selectedEvidence.reliability === "medium" ? "td-noise" : "",
+            ].join(" ")}
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
+            <motion.span
+              className="td-stamp absolute right-5 top-10 rotate-[-8deg] text-[#9d6d21] opacity-80"
+              initial={{ opacity: 0, scale: 1.45, rotate: -16 }}
+              animate={{ opacity: 0.8, scale: 1, rotate: -8 }}
+              transition={{ delay: 0.12, duration: 0.28, ease: "easeOut" }}
+            >
+              archived
+            </motion.span>
             <div className="mb-3 flex items-center justify-between">
               <span className="font-mono text-[0.62rem] text-[#9d6d21]">{evidenceTypeLabels[selectedEvidence.type] ?? selectedEvidence.type}</span>
               <button onClick={() => setSelectedEvidence(null)} type="button" className="text-[#8b8171] hover:text-[#9d6d21]"><X size={13} /></button>
@@ -313,8 +394,8 @@ export function LeftDrawer({
                 {selectedEvidence.reliability === "high" ? "高" : selectedEvidence.reliability === "medium" ? "中" : "低"}
               </span>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
     </div>
   );
@@ -328,6 +409,8 @@ export function CenterStage({
   chatMessages,
   chatMode,
   commandDisabled,
+  currentLocation,
+  evidenceCount,
   input,
   isActing,
   isBooting,
@@ -343,6 +426,8 @@ export function CenterStage({
   chatMessages: InvestigationChatMessage[];
   chatMode: ChatModeState;
   commandDisabled: boolean;
+  currentLocation?: InvestigationData["currentLocation"];
+  evidenceCount: number;
   input: string;
   isActing: boolean;
   isBooting: boolean;
@@ -355,6 +440,9 @@ export function CenterStage({
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const [cmdExpanded, setCmdExpanded] = useState(false);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const locationPulse = usePulseFlag(currentLocation?.id ?? "", 1100);
+  const evidencePulse = usePulseFlag(evidenceCount, 1100);
+  const solvedPulse = usePulseFlag(phase === "solved", 1700);
 
   useEffect(() => {
     const element = chatScrollRef.current;
@@ -363,25 +451,61 @@ export function CenterStage({
   }, [chatMessages]);
 
   const statusText = isActing ? "正在生成回答" : chatMode.mode === "interrogation" ? "问询接入" : "案件助手在线";
+  const isInterrogation = chatMode.mode === "interrogation";
 
   return (
-    <section ref={workspaceRef} className="relative min-h-0 overflow-hidden bg-[#ede8dc]">
+    <motion.section
+      ref={workspaceRef}
+      className="relative min-h-0 overflow-hidden bg-[#ede8dc]"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.32, ease: "easeOut" }}
+    >
       {isBooting ? (
         <div className="td-scrollbar h-full overflow-y-auto p-4">
           <BootConsole activeStep={activeStep} error={bootError} progress={bootProgress} status={bootStatus} />
         </div>
       ) : (
         <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#f1eee6] text-[#27241f]">
-          <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(39,36,31,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(39,36,31,0.9)_1px,transparent_1px)] [background-size:28px_28px]" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[linear-gradient(180deg,rgba(111,213,199,0.18),transparent)]" />
+          <motion.div
+            className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(39,36,31,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(39,36,31,0.9)_1px,transparent_1px)]"
+            animate={{
+              opacity: isInterrogation ? 0.11 : 0.07,
+              backgroundSize: isInterrogation ? "24px 24px" : "28px 28px",
+            }}
+            transition={{ duration: 0.34 }}
+          />
+          <motion.div
+            className="pointer-events-none absolute inset-x-0 top-0 h-32"
+            animate={{
+              background: isInterrogation
+                ? "linear-gradient(180deg,rgba(197,83,61,0.17),transparent)"
+                : "linear-gradient(180deg,rgba(111,213,199,0.18),transparent)",
+            }}
+            transition={{ duration: 0.3 }}
+          />
 
-          <div className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b border-[#c8c0ae] bg-[#fbf8f0]/92 px-5 shadow-[0_12px_36px_rgba(36,30,22,0.08)]">
+          <motion.div
+            className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b px-5 shadow-[0_12px_36px_rgba(36,30,22,0.08)]"
+            animate={{
+              backgroundColor: isInterrogation ? "rgba(255, 240, 234, 0.94)" : "rgba(251, 248, 240, 0.92)",
+              borderColor: isInterrogation ? "#d0a092" : "#c8c0ae",
+            }}
+            transition={{ duration: 0.28 }}
+          >
             <div className="flex min-w-0 items-center gap-3">
-              <span className="grid h-9 w-9 place-items-center rounded-md border border-[#d8cfba] bg-[#163c3a] text-[#d8fff8] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)]">
+              <motion.span
+                className="grid h-9 w-9 place-items-center rounded-md border text-[#d8fff8] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)]"
+                animate={{
+                  backgroundColor: isInterrogation ? "#6d2d25" : "#163c3a",
+                  borderColor: isInterrogation ? "#b86956" : "#d8cfba",
+                }}
+                transition={{ duration: 0.28 }}
+              >
                 <Bot size={16} />
-              </span>
+              </motion.span>
               <div className="min-w-0">
-                <p className="line-clamp-1 text-sm font-bold text-[#1f2927]">
+                <p className={["line-clamp-1 text-sm font-bold text-[#1f2927]", isInterrogation ? "td-divergence" : ""].join(" ")}>
                   {chatMode.mode === "interrogation" ? `问询对象 / ${chatMode.label}` : chatMode.label}
                 </p>
                 <p className="font-mono text-[0.58rem] uppercase tracking-[0.2em] text-[#776f61]">
@@ -389,13 +513,58 @@ export function CenterStage({
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 rounded-full border border-[#d8cfba] bg-white/70 px-3 py-1.5 font-mono text-[0.62rem] text-[#24615b]">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#2a8c80]" />
+            <motion.div
+              className="flex items-center gap-2 rounded-full border bg-white/70 px-3 py-1.5 font-mono text-[0.62rem]"
+              animate={{
+                borderColor: isInterrogation ? "#d0a092" : "#d8cfba",
+                color: isInterrogation ? "#a64e3b" : "#24615b",
+              }}
+            >
+              <motion.span
+                className="h-1.5 w-1.5 rounded-full"
+                animate={{
+                  scale: isActing ? [1, 1.55, 1] : [1, 1.25, 1],
+                  backgroundColor: isInterrogation ? "#c5533d" : "#2a8c80",
+                }}
+                transition={{ duration: isInterrogation ? 1.25 : 1, repeat: Infinity }}
+              />
               {statusText}
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
+
+          <AnimatePresence>
+            {locationPulse && currentLocation && (
+              <motion.div
+                className="pointer-events-none absolute inset-x-8 top-20 z-20 overflow-hidden border border-[#b8d8d2] bg-[#e8f6f2]/92 px-4 py-3 shadow-[0_18px_50px_rgba(36,30,22,0.14)]"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+              >
+                <motion.div
+                  className="absolute inset-y-0 left-0 w-1/2 bg-[linear-gradient(90deg,transparent,rgba(111,213,199,0.28),transparent)]"
+                  initial={{ x: "-120%" }}
+                  animate={{ x: "240%" }}
+                  transition={{ duration: 0.85, ease: "easeInOut" }}
+                />
+                <p className="relative font-mono text-[0.62rem] uppercase tracking-[0.2em] text-[#24615b]">current location updated</p>
+                <p className="relative mt-1 line-clamp-1 text-sm font-bold text-[#27241f]">{currentLocation.name}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <div ref={chatScrollRef} className="td-scrollbar relative z-10 min-h-0 flex-1 overflow-y-auto px-6 pb-36 pt-6">
+            <AnimatePresence>
+              {evidencePulse && (
+                <motion.div
+                  className="pointer-events-none absolute inset-x-6 top-0 h-1 bg-[linear-gradient(90deg,transparent,#6fd5c7,#e7f05f,transparent)]"
+                  initial={{ opacity: 0, scaleX: 0, transformOrigin: "0% 50%" }}
+                  animate={{ opacity: 1, scaleX: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.5, ease: "easeOut" }}
+                />
+              )}
+            </AnimatePresence>
             <div className="mx-auto flex max-w-3xl flex-col gap-4">
               {chatMessages.length === 0 && (
                 <div className="rounded-lg border border-[#d8cfba] bg-white/82 p-5 shadow-[0_18px_60px_rgba(49,40,28,0.12)]">
@@ -431,7 +600,11 @@ export function CenterStage({
                           {message.label ?? (isUser ? "你" : isSuspect ? "问询对象" : "案件 AI 助手")}
                         </span>
                         {message.pending && (
-                          <span className="font-mono text-[0.55rem] text-[#8b8171]">typing</span>
+                          <span className="flex items-center gap-1 text-[#8b8171]" aria-label="typing">
+                            <span className="td-typing-dot" />
+                            <span className="td-typing-dot" />
+                            <span className="td-typing-dot" />
+                          </span>
                         )}
                       </div>
                       <p className="whitespace-pre-wrap text-sm leading-6">{message.text || "..."}</p>
@@ -445,15 +618,43 @@ export function CenterStage({
       )}
 
       {phase === "solved" && (
-        <div className="absolute right-3 top-3 z-10 border border-signal/60 bg-[#e7f05f]/15 px-3 py-1.5 font-mono text-xs text-[#6f6f18]">
+        <motion.div
+          className="absolute right-3 top-3 z-10 border border-signal/60 bg-[#e7f05f]/15 px-3 py-1.5 font-mono text-xs text-[#6f6f18]"
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
           案件已结案
-        </div>
+        </motion.div>
       )}
+
+      <AnimatePresence>
+        {solvedPulse && phase === "solved" && (
+          <motion.div
+            className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-[#27241f]/12 backdrop-blur-[1px]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="td-stamp border-[#9d6d21] bg-[#fffdf7]/90 px-6 py-4 text-2xl text-[#9d6d21] shadow-[0_20px_80px_rgba(49,40,28,0.18)]"
+              initial={{ opacity: 0, scale: 1.7, rotate: -9 }}
+              animate={{ opacity: 1, scale: [1.7, 0.96, 1], rotate: -9 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.48, ease: "easeOut" }}
+            >
+              CASE CLOSED
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {!isBooting && (
         <div className="absolute bottom-5 left-1/2 z-20 w-[min(700px,calc(100%-2.5rem))] -translate-x-1/2">
           <motion.div
-            className="rounded-xl border border-[#d6c9ae] bg-[#fffdf7]/95 shadow-[0_22px_80px_rgba(36,30,22,0.24)] backdrop-blur"
+            className={[
+              "rounded-xl border border-[#d6c9ae] bg-[#fffdf7]/95 shadow-[0_22px_80px_rgba(36,30,22,0.24)] backdrop-blur",
+              isActing ? "td-scanline" : "",
+            ].join(" ")}
             animate={{ height: cmdExpanded ? "auto" : undefined }}
           >
             <AnimatePresence initial={false}>
@@ -466,15 +667,18 @@ export function CenterStage({
                   transition={{ duration: 0.15 }}
                 >
                   {recommendedCommands.map((cmd) => (
-                    <button
+                    <motion.button
                       key={cmd}
                       className="h-7 shrink-0 rounded-full border border-[#d8cfba] bg-[#f4efe5] px-2.5 font-mono text-[0.63rem] text-[#675d4f] transition hover:border-[#24615b] hover:text-[#24615b]"
                       disabled={commandDisabled}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      whileTap={{ scale: 0.96 }}
                       onMouseDown={(e) => { e.preventDefault(); onCommand(cmd); setCmdExpanded(false); }}
                       type="button"
                     >
                       {cmd}
-                    </button>
+                    </motion.button>
                   ))}
                 </motion.div>
               )}
@@ -518,7 +722,7 @@ export function CenterStage({
           </motion.div>
         </div>
       )}
-    </section>
+    </motion.section>
   );
 }
 
@@ -542,10 +746,17 @@ export function RightRail({
   onOpenTimeline: () => void;
 }) {
   const [suspectsExpanded, setSuspectsExpanded] = useState(false);
+  const previousTruthScore = usePrevious(state?.truthScore ?? 0);
+  const truthDelta = state ? state.truthScore - previousTruthScore : 0;
+  const truthPulse = usePulseFlag(state?.truthScore ?? 0, 1100);
+
+  useEffect(() => {
+    if (data?.visibleSuspects.length) setSuspectsExpanded(true);
+  }, [data?.visibleSuspects.length]);
 
   if (isBooting || !data || !state) {
     return (
-      <aside className="flex flex-col gap-4 border-l border-[#d8cfba] bg-[#ede8dc] p-4">
+      <aside className="flex h-full flex-col gap-4 border-l border-[#d8cfba] bg-[#ede8dc] p-4">
         <div>
           <p className="font-mono text-[0.65rem] text-[#24615b]">生成状态</p>
           <p className="mt-2 text-xs text-[#675d4f]">{bootSteps.find((s) => s.id === activeStep)?.title}</p>
@@ -558,18 +769,16 @@ export function RightRail({
   }
 
   return (
-    <aside className="td-scrollbar flex flex-col gap-4 overflow-y-auto border-l border-[#d8cfba] bg-[#ede8dc] p-4">
+    <motion.aside
+      className="td-scrollbar flex h-full flex-col gap-4 overflow-y-auto border-l border-[#d8cfba] bg-[#ede8dc] p-4"
+      initial={{ opacity: 0, x: 12 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.28, ease: "easeOut" }}
+    >
       {/* Truth gauge */}
       <div>
         <div className="flex items-center gap-3">
-          <div
-            className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-full"
-            style={{ background: `conic-gradient(#6fd5c7 ${state.truthScore * 3.6}deg, rgba(255,255,255,0.07) 0deg)` }}
-          >
-            <div className="flex h-[3.2rem] w-[3.2rem] items-center justify-center rounded-full bg-[#fffdf7] font-mono text-sm font-black text-[#24615b]">
-              {state.truthScore}%
-            </div>
-          </div>
+          <TruthGauge score={state.truthScore} delta={truthDelta} pulse={truthPulse} />
           <div>
             <p className="font-mono text-[0.6rem] uppercase tracking-widest text-[#24615b]">{phaseLabels[state.phase]}</p>
             <p className="mt-1 line-clamp-2 text-[0.65rem] leading-4 text-[#776f61]">{shortText(actionStatus, 40)}</p>
@@ -603,60 +812,172 @@ export function RightRail({
       </div>
 
       {/* Suspects accordion */}
-      {data.visibleSuspects.length > 0 && (
-        <div>
-          <button
-            className="flex w-full items-center justify-between font-mono text-[0.65rem] text-[#9d6d21] transition hover:text-[#6f6f18]"
-            onClick={() => setSuspectsExpanded(!suspectsExpanded)}
-            type="button"
-          >
-            <span>人物状态 ({data.visibleSuspects.length})</span>
-            {suspectsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          </button>
-          <AnimatePresence initial={false}>
-            {suspectsExpanded && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.18 }}
-                className="overflow-hidden"
-              >
-                <div className="mt-2 flex flex-col gap-2">
-                  {data.visibleSuspects.map((suspect) => {
-                    const ss = state.suspectStates[suspect.id];
-                    return (
-                      <div key={suspect.id} className="border border-[#ded4c0] bg-[#f4efe5] p-3">
-                        <div className="flex items-center gap-2">
-                          <UserRound size={15} className="shrink-0 text-[#a64e3b]" />
-                          <div className="min-w-0">
-                            <p className="line-clamp-1 text-xs font-semibold text-[#27241f]">{suspect.name}</p>
-                            <p className="font-mono text-[0.55rem] text-[#a64e3b]">
-                              {emotionLabels[ss?.currentEmotion ?? ""] ?? ss?.currentEmotion}
-                            </p>
-                          </div>
-                        </div>
-                        <SignalBar label="压" value={ss?.pressure ?? 0} tone="rust" />
-                        <SignalBar label="疑" value={ss?.suspicion ?? 0} tone="brass" />
-                        <SignalBar label="信" value={ss?.trust ?? 0} tone="scan" />
-                      </div>
-                    );
-                  })}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      )}
-    </aside>
+      <div>
+        <button
+          aria-expanded={data.visibleSuspects.length > 0 ? suspectsExpanded : undefined}
+          className={[
+            "flex w-full items-center justify-between font-mono text-[0.65rem] text-[#9d6d21] transition",
+            data.visibleSuspects.length > 0 ? "hover:text-[#6f6f18]" : "cursor-default",
+          ].join(" ")}
+          onClick={() => data.visibleSuspects.length > 0 && setSuspectsExpanded(!suspectsExpanded)}
+          type="button"
+        >
+          <span>人物状态 ({data.visibleSuspects.length})</span>
+          {data.visibleSuspects.length > 0 ? (
+            suspectsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
+          ) : (
+            <span className="text-[0.55rem] text-[#8f8574]">待确认</span>
+          )}
+        </button>
+        <AnimatePresence initial={false}>
+          {data.visibleSuspects.length > 0 && suspectsExpanded ? (
+            <motion.div
+              key="suspects"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-2 flex flex-col gap-2">
+                {data.visibleSuspects.map((suspect) => {
+                  const ss = state.suspectStates[suspect.id];
+                  return <SuspectStatusCard key={suspect.id} name={suspect.name} state={ss} />;
+                })}
+              </div>
+            </motion.div>
+          ) : data.visibleSuspects.length === 0 ? (
+            <motion.div
+              key="suspect-empty"
+              className="mt-2 border border-dashed border-[#d6c9ae] bg-[#f4efe5] p-3"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="flex items-center gap-2 text-[#8f8574]">
+                <UserRound size={14} />
+                <p className="font-mono text-[0.58rem] uppercase tracking-[0.16em]">no suspect pinned</p>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-[#675d4f]">
+                等门禁、监控、口供或物证指到某个人，这里会自动亮出人物状态。
+              </p>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </div>
+    </motion.aside>
   );
 }
 
 function NodeBadge({ label }: { label: string }) {
   return (
-    <div className="grid min-h-12 place-items-center border border-[#d8cfba] bg-[#fff5db] p-2 text-center">
+    <motion.div
+      className="grid min-h-12 place-items-center border border-[#d8cfba] bg-[#fff5db] p-2 text-center"
+      initial={{ opacity: 0, y: 5 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18 }}
+    >
       <span className="line-clamp-2 text-xs font-semibold text-[#27241f]">{label}</span>
-    </div>
+    </motion.div>
+  );
+}
+
+function TruthGauge({ score, delta, pulse }: { score: number; delta: number; pulse: boolean }) {
+  const motionScore = useMotionValue(score);
+  const springScore = useSpring(motionScore, { stiffness: 92, damping: 18, mass: 0.55 });
+  const roundedScore = useTransform(springScore, (value) => Math.round(value));
+  const angle = useTransform(springScore, (value) => `${Math.max(0, Math.min(100, value)) * 3.6}deg`);
+  const background = useTransform(angle, (value) => `conic-gradient(#6fd5c7 ${value}, rgba(255,255,255,0.14) 0deg)`);
+
+  useEffect(() => {
+    motionScore.set(score);
+  }, [motionScore, score]);
+
+  return (
+    <motion.div
+      className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-full"
+      style={{ background }}
+      animate={pulse ? { scale: [1, 1.08, 1], boxShadow: ["0 0 0 rgba(111,213,199,0)", "0 0 24px rgba(111,213,199,0.32)", "0 0 0 rgba(111,213,199,0)"] } : { scale: 1 }}
+      transition={{ duration: 0.54, ease: "easeOut" }}
+    >
+      <div className="flex h-[3.2rem] w-[3.2rem] items-center justify-center rounded-full bg-[#fffdf7] font-mono text-sm font-black text-[#24615b]">
+        <motion.span>{roundedScore}</motion.span>%
+      </div>
+      <AnimatePresence>
+        {pulse && delta !== 0 && (
+          <motion.span
+            className={[
+              "absolute -right-2 -top-2 border bg-[#fffdf7] px-1.5 py-0.5 font-mono text-[0.58rem] font-black",
+              delta > 0 ? "border-[#b8d8d2] text-[#24615b]" : "border-[#d0a092] text-[#a64e3b]",
+            ].join(" ")}
+            initial={{ opacity: 0, y: 4, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4 }}
+          >
+            {delta > 0 ? "+" : ""}
+            {delta}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function SuspectStatusCard({ name, state }: { name: string; state?: SuspectState }) {
+  const pressure = state?.pressure ?? 0;
+  const suspicion = state?.suspicion ?? 0;
+  const trust = state?.trust ?? 0;
+  const emotion = state?.currentEmotion ?? "calm";
+  const previousPressure = usePrevious(pressure);
+  const previousTrust = usePrevious(trust);
+  const stateSignature = `${pressure}:${suspicion}:${trust}:${emotion}`;
+  const changed = usePulseFlag(stateSignature, 820);
+  const pressureRose = pressure > previousPressure;
+  const trustRose = trust > previousTrust;
+  const unstable = emotion === "nervous" || emotion === "angry" || emotion === "broken" || pressureRose;
+
+  return (
+    <motion.div
+      className={[
+        "border p-3",
+        unstable ? "td-divergence" : "",
+        trustRose ? "bg-[#fff5db]" : "bg-[#f4efe5]",
+      ].join(" ")}
+      animate={
+        changed
+          ? {
+              x: unstable ? [0, -1, 1, 0] : 0,
+              borderColor: pressureRose ? ["#ded4c0", "#c5533d", "#ded4c0"] : trustRose ? ["#ded4c0", "#d6a247", "#ded4c0"] : ["#ded4c0", "#b8d8d2", "#ded4c0"],
+            }
+          : { x: 0, borderColor: "#ded4c0" }
+      }
+      transition={{ duration: 0.42, ease: "easeOut" }}
+    >
+      <div className="flex items-center gap-2">
+        <motion.span animate={changed ? { scale: [1, 1.12, 1] } : { scale: 1 }} transition={{ duration: 0.32 }}>
+          <UserRound size={15} className="shrink-0 text-[#a64e3b]" />
+        </motion.span>
+        <div className="min-w-0">
+          <p className="line-clamp-1 text-xs font-semibold text-[#27241f]">{name}</p>
+          <AnimatePresence mode="wait">
+            <motion.p
+              key={emotion}
+              className="font-mono text-[0.55rem] text-[#a64e3b]"
+              initial={{ opacity: 0, y: -3 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 3 }}
+              transition={{ duration: 0.16 }}
+            >
+              {emotionLabels[emotion] ?? emotion}
+            </motion.p>
+          </AnimatePresence>
+        </div>
+      </div>
+      <SignalBar label="压" value={pressure} tone="rust" />
+      <SignalBar label="疑" value={suspicion} tone="brass" />
+      <SignalBar label="信" value={trust} tone="scan" />
+    </motion.div>
   );
 }
 
@@ -670,20 +991,42 @@ function SignalBar({ label, value, tone }: { label: string; value: number; tone:
   return (
     <div className="mt-2 grid grid-cols-[1rem_1fr_2rem] items-center gap-2">
       <span className="font-mono text-[0.58rem] text-[#8f8574]">{label}</span>
-      <span className="h-1.5 bg-[#d8cfba]">
-        <span className={`block h-full ${colorClass}`} style={{ width: `${value}%` }} />
+      <span className="h-1.5 overflow-hidden bg-[#d8cfba]">
+        <motion.span
+          className={`block h-full ${colorClass}`}
+          initial={false}
+          animate={{ width: `${value}%` }}
+          transition={{ duration: 0.38, ease: [0.25, 0.1, 0.25, 1] }}
+        />
       </span>
-      <span className="text-right font-mono text-[0.58rem] text-[#a99f8d]">{value}</span>
+      <motion.span key={value} className="text-right font-mono text-[0.58rem] text-[#a99f8d]" initial={{ opacity: 0.55, y: -2 }} animate={{ opacity: 1, y: 0 }}>
+        {value}
+      </motion.span>
     </div>
   );
 }
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border border-[#ded4c0] bg-[#f4efe5] p-2 text-center">
+    <motion.div
+      className="border border-[#ded4c0] bg-[#f4efe5] p-2 text-center"
+      animate={{ borderColor: ["#ded4c0", "#b8d8d2", "#ded4c0"] }}
+      transition={{ duration: 0.5 }}
+    >
       <p className="font-mono text-[0.58rem] uppercase tracking-[0.16em] text-[#8f8574]">{label}</p>
-      <p className="mt-1 text-lg font-black leading-none text-[#9d6d21]">{value}</p>
-    </div>
+      <AnimatePresence mode="wait">
+        <motion.p
+          key={value}
+          className="mt-1 text-lg font-black leading-none text-[#9d6d21]"
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 4 }}
+          transition={{ duration: 0.16 }}
+        >
+          {value}
+        </motion.p>
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
@@ -695,9 +1038,16 @@ export function RelationshipModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur" onClick={onClose}>
-      <div
+    <motion.div
+      className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      onClick={onClose}
+    >
+      <motion.div
         className="w-full max-w-2xl border border-[#cfa65b] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]"
+        initial={{ opacity: 0, y: 14, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -707,24 +1057,47 @@ export function RelationshipModal({
         <div className="td-scrollbar max-h-[60vh] overflow-y-auto">
           {data.visibleRelationships.length ? (
             <div className="grid gap-3">
-              {data.visibleRelationships.map((rel) => (
-                <div key={rel.id} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              {data.visibleRelationships.map((rel, index) => (
+                <motion.div
+                  key={rel.id}
+                  className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.045, duration: 0.22 }}
+                >
                   <NodeBadge label={data.entityNameById.get(rel.from) ?? rel.from} />
                   <div className="grid place-items-center text-[#9d6d21]">
-                    <GitBranch size={14} />
-                    <span className="mt-1 font-mono text-[0.58rem]">{rel.status}</span>
+                    <svg className="h-5 w-12 overflow-visible" viewBox="0 0 48 20" aria-hidden="true">
+                      <motion.path
+                        d="M2 10 C14 2, 34 18, 46 10"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        initial={{ pathLength: 0, opacity: 0.35 }}
+                        animate={{ pathLength: 1, opacity: 1 }}
+                        transition={{ delay: index * 0.045 + 0.08, duration: 0.42, ease: "easeInOut" }}
+                      />
+                    </svg>
+                    <motion.span
+                      className="mt-1 font-mono text-[0.58rem]"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: index * 0.045 + 0.28 }}
+                    >
+                      {rel.status}
+                    </motion.span>
                   </div>
                   <NodeBadge label={data.entityNameById.get(rel.to) ?? rel.to} />
                   <p className="col-span-3 text-center text-xs text-[#675d4f]">{rel.label}</p>
-                </div>
+                </motion.div>
               ))}
             </div>
           ) : (
             <p className="text-sm text-[#776f61]">关系图尚未形成。需要先获得能支撑关系的证据。</p>
           )}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -736,9 +1109,16 @@ export function TimelineModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur" onClick={onClose}>
-      <div
+    <motion.div
+      className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      onClick={onClose}
+    >
+      <motion.div
         className="w-full max-w-2xl border border-[#cfa65b] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]"
+        initial={{ opacity: 0, y: 14, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -748,18 +1128,39 @@ export function TimelineModal({
         <div className="td-scrollbar max-h-[60vh] overflow-y-auto">
           {state.playerTimeline.length ? (
             <ol className="grid gap-3">
-              {state.playerTimeline.map((event) => (
-                <li key={event.id} className="grid grid-cols-[3.5rem_1fr] items-start gap-3">
-                  <span className="border border-[#d6c9ae] bg-[#fff0cc] px-2 py-1 text-center font-mono text-[0.62rem] text-[#9d6d21]">{event.time}</span>
-                  <p className="border-l border-[#cfa65b] pl-3 text-xs leading-5 text-[#3d352b]">{event.description}</p>
-                </li>
+              {state.playerTimeline.map((event, index) => (
+                <motion.li
+                  key={event.id}
+                  className="grid grid-cols-[3.5rem_1fr] items-start gap-3"
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.05, duration: 0.2 }}
+                >
+                  <motion.span
+                    className="border border-[#d6c9ae] bg-[#fff0cc] px-2 py-1 text-center font-mono text-[0.62rem] text-[#9d6d21]"
+                    initial={{ scale: 1.08 }}
+                    animate={{ scale: 1 }}
+                    transition={{ delay: index * 0.05, duration: 0.2 }}
+                  >
+                    {event.time}
+                  </motion.span>
+                  <p className="relative border-l border-[#cfa65b] pl-3 text-xs leading-5 text-[#3d352b]">
+                    <motion.span
+                      className="absolute -left-[3px] top-1 h-1.5 w-1.5 rounded-full bg-[#24615b]"
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ delay: index * 0.05 + 0.1, duration: 0.18 }}
+                    />
+                    {event.description}
+                  </p>
+                </motion.li>
               ))}
             </ol>
           ) : (
             <p className="text-sm text-[#776f61]">暂无已确认时间点。</p>
           )}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

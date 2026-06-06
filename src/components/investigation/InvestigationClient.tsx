@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BriefingModal } from "@/components/investigation/BriefingModal";
+import { BriefingScreen } from "@/components/investigation/BriefingModal";
 import {
   CenterStage,
   LeftDrawer,
@@ -27,7 +27,10 @@ export function InvestigationClient() {
 
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#ede8dc] text-[#27241f]">
-      <div className="grid min-h-0 flex-1 grid-cols-[3rem_1fr_240px] overflow-hidden md:grid-cols-[3rem_1fr_240px]">
+      {session && investigation.showBriefing ? (
+        <BriefingScreen session={session} onClose={() => investigation.setShowBriefing(false)} />
+      ) : (
+      <div className="grid min-h-0 flex-1 grid-cols-[3rem_minmax(0,1fr)] overflow-hidden md:grid-cols-[3rem_minmax(0,1fr)_240px]">
         {/* Left drawer */}
         <LeftDrawer
           data={investigation.data}
@@ -49,6 +52,8 @@ export function InvestigationClient() {
             investigation.isActing ||
             state?.phase === "solved"
           }
+          currentLocation={investigation.data?.currentLocation}
+          evidenceCount={investigation.data?.discoveredEvidence.length ?? 0}
           input={input}
           isActing={investigation.isActing}
           isBooting={investigation.isBooting}
@@ -59,20 +64,19 @@ export function InvestigationClient() {
         />
 
         {/* Right rail */}
-        <RightRail
-          actionStatus={investigation.actionStatus}
-          activeStep={investigation.activeBootStep}
-          bootProgress={investigation.bootProgress}
-          data={investigation.data}
-          isBooting={investigation.isBooting}
-          state={state}
-          onOpenRelationship={() => setRelationshipOpen(true)}
-          onOpenTimeline={() => setTimelineOpen(true)}
-        />
+        <div className="hidden min-h-0 md:block">
+          <RightRail
+            actionStatus={investigation.actionStatus}
+            activeStep={investigation.activeBootStep}
+            bootProgress={investigation.bootProgress}
+            data={investigation.data}
+            isBooting={investigation.isBooting}
+            state={state}
+            onOpenRelationship={() => setRelationshipOpen(true)}
+            onOpenTimeline={() => setTimelineOpen(true)}
+          />
+        </div>
       </div>
-
-      {session && investigation.showBriefing && (
-        <BriefingModal session={session} onClose={() => investigation.setShowBriefing(false)} />
       )}
 
       {relationshipOpen && investigation.data && (

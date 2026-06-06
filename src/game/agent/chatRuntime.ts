@@ -55,6 +55,14 @@ function visibleSuspectById(id: string | undefined, caseData: CaseData, state: P
   return caseData.suspects.find((suspect) => suspect.id === id);
 }
 
+function wantsAssistantWhileInterrogating(text: string) {
+  return /助手|帮我|总结|整理|复盘|分析|关系图|时间线|查|调查|调取|查看|打开|翻|监控|门禁|账册|记录|日志|证据/.test(text);
+}
+
+function looksLikeDirectSuspectQuestion(text: string) {
+  return /^(你|你们)|你和|你跟|你认识|你当时|你为什么|你几点|你有没有|你是不是|你到底|说清楚|解释/.test(text);
+}
+
 export function routeChatCommand(
   input: string,
   caseData: CaseData,
@@ -93,6 +101,9 @@ export function routeChatCommand(
 
   if (currentMode.mode === "interrogation") {
     const activeSuspect = visibleSuspectById(currentMode.suspectId, caseData, state);
+    if (activeSuspect && looksLikeDirectSuspectQuestion(text) && !wantsAssistantWhileInterrogating(text)) {
+      return { kind: "suspect_question", suspect: activeSuspect };
+    }
     if (activeSuspect && ["ASK_ASSISTANT", "INTERROGATE_SUSPECT", "USE_EVIDENCE"].includes(parsedAction.intent)) {
       return { kind: "suspect_question", suspect: activeSuspect };
     }
@@ -107,6 +118,10 @@ function evidenceTitles(caseData: CaseData, state: PlayerCaseState) {
     .map((evidence) => `「${evidence.title}」`);
 }
 
+function asksForAdvice(input: string) {
+  return /下一步|建议|怎么查|查哪里|怎么办|方向|计划|该问谁|先查/.test(input);
+}
+
 function currentLocation(caseData: CaseData, state: PlayerCaseState) {
   return caseData.locations.find((location) => location.id === state.currentLocation);
 }
@@ -119,21 +134,31 @@ export function buildAssistantReply(
 ) {
   const location = currentLocation(caseData, state);
   const evidence = evidenceTitles(caseData, state).slice(-4);
+  const genericAssistantText = result.resultText.includes("副手已接入")
+    ? "我先不硬造新东西，就按你手上已经亮出来的线索往下捋。"
+    : result.resultText;
   const lines = [
-    result.resultText,
-    location ? `当前焦点仍在「${location.name}」。` : "",
-    evidence.length ? `最近可用材料：${evidence.join("、")}。` : "这条先按待核验线索处理，优先从当前场景的物件和记录来源查起。",
+    genericAssistantText ? `我先按这轮结果看：${genericAssistantText}` : "",
     result.unlockedEvidence.length
-      ? `这轮新增了 ${result.unlockedEvidence.length} 份证据，左侧证据索引会同步更新。`
+      ? `刚归进去 ${result.unlockedEvidence.length} 份新材料。`
       : "",
-    "你可以继续把怀疑点抛出来，我会帮你转成可查的记录、人物或时间线方向。",
   ].filter(Boolean);
 
-  if (input.includes("总结") || input.includes("整理")) {
-    lines.unshift("我先按已知事实做一版工作摘要。");
+  if (asksForAdvice(input)) {
+    lines.push(
+      evidence.length
+        ? `眼前能先对的是 ${evidence.slice(0, 2).join("、")}。`
+        : location
+          ? `先贴着「${location.name}」里已经露出的记录看。`
+          : "先从已经出现过的记录和口供矛盾里挑一个点追。",
+    );
   }
 
-  return lines.join("\n");
+  if (input.includes("总结") || input.includes("整理")) {
+    lines.unshift("行，我先把手上的东西捋一遍，不急着下结论。");
+  }
+
+  return lines.slice(0, 3).join("\n");
 }
 
 export function buildSuspectReply(
