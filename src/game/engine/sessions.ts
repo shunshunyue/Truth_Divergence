@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
+import type { CaseVisualManifest } from "@/game/schemas/visuals";
 
 export type SessionChatMessage = {
   role: "user" | "assistant";
@@ -14,6 +15,7 @@ export type GameSession = {
   sessionId: string;
   caseData: CaseData;
   state: PlayerCaseState;
+  visualManifest?: CaseVisualManifest;
   chatHistory: SessionChatMessage[];
   createdAt: string;
   updatedAt: string;

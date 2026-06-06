@@ -1,4 +1,6 @@
+import { randomUUID } from "crypto";
 import { generateInitialSession } from "@/ai/caseGenerator";
+import { generateCaseVisualManifest } from "@/ai/imageGenerator";
 import { countReadyCases, insertFailedCase, insertReadyCase } from "@/game/cache/caseCache";
 
 export type CaseCacheWorkerEvent = {
@@ -10,6 +12,9 @@ export type CaseCacheWorkerEvent = {
     | "ai-status"
     | "ai-progress"
     | "generate-complete"
+    | "visual-start"
+    | "visual-progress"
+    | "visual-complete"
     | "insert"
     | "done"
     | "error";
@@ -120,6 +125,26 @@ export async function refillCaseCacheOnce(logger?: CaseCacheWorkerLogger) {
           suspects: session.caseData.suspects.length,
           evidence: session.caseData.evidence.length,
           timeline: session.caseData.timeline.length,
+        });
+
+        const cacheId = randomUUID();
+        emit(logger, "visual-start", "开始生成案件视觉资产包。", {
+          cacheId,
+          title: session.caseData.title,
+        });
+        const visualManifest = await generateCaseVisualManifest(session.caseData, {
+          cacheId,
+          logger(message, data) {
+            emit(logger, "visual-progress", message, data);
+          },
+        });
+        session.visualManifest = visualManifest;
+        emit(logger, "visual-complete", "案件视觉资产包生成完成。", {
+          cacheId,
+          total: visualManifest.assets.length,
+          ready: visualManifest.assets.filter((asset) => asset.status === "ready").length,
+          failed: visualManifest.assets.filter((asset) => asset.status === "failed").length,
+          fallback: visualManifest.assets.filter((asset) => asset.source === "fallback").length,
         });
 
         const id = await insertReadyCase(session);

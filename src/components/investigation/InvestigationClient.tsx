@@ -60,6 +60,8 @@ export function InvestigationClient() {
           phase={state?.phase}
           recommendedCommands={investigation.data?.recommendedCommands ?? []}
           setInput={setInput}
+          visualFocus={investigation.visualFocus}
+          visualManifest={investigation.session?.visualManifest}
           onCommand={submitCommand}
         />
 
@@ -72,6 +74,7 @@ export function InvestigationClient() {
             data={investigation.data}
             isBooting={investigation.isBooting}
             state={state}
+            visualFocus={investigation.visualFocus}
             onOpenRelationship={() => setRelationshipOpen(true)}
             onOpenTimeline={() => setTimelineOpen(true)}
           />
@@ -82,8 +85,8 @@ export function InvestigationClient() {
       {relationshipOpen && investigation.data && (
         <RelationshipModal data={investigation.data} onClose={() => setRelationshipOpen(false)} />
       )}
-      {timelineOpen && state && (
-        <TimelineModal state={state} onClose={() => setTimelineOpen(false)} />
+      {timelineOpen && state && investigation.data && (
+        <TimelineModal data={investigation.data} state={state} onClose={() => setTimelineOpen(false)} />
       )}
     </main>
   );

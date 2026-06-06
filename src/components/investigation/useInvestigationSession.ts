@@ -16,7 +16,9 @@ import {
   type ChatModeState,
   type InvestigationChatMessage,
   type SessionPayload,
+  type VisualFocusState,
 } from "@/components/investigation/types";
+import type { CaseVisualManifest, VisualAsset } from "@/game/schemas/visuals";
 
 const simulatedBootTimeline: Array<{ step: BootStepId; progress: number; status: string; delay: number }> = [
   { step: "core", progress: 18, status: "缓存命中，正在核对案件核心...", delay: 180 },
@@ -170,6 +172,7 @@ export function useInvestigationSession() {
   const [actionStatus, setActionStatus] = useState("等待调查指令。");
   const [chatMode, setChatMode] = useState<ChatModeState>({ mode: "assistant", label: "案件 AI 助手" });
   const [chatMessages, setChatMessages] = useState<InvestigationChatMessage[]>([]);
+  const [visualFocus, setVisualFocus] = useState<VisualFocusState>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -228,6 +231,25 @@ export function useInvestigationSession() {
 
         sessionRef.current = nextSession;
         return nextSession;
+      });
+    }
+
+    function mergeVisualManifest(updater: (current: CaseVisualManifest | undefined) => CaseVisualManifest | undefined) {
+      mergeSession((current) => ({
+        ...current,
+        visualManifest: updater(current.visualManifest),
+      }));
+    }
+
+    function upsertVisualAsset(asset: VisualAsset) {
+      mergeVisualManifest((manifest) => {
+        if (!manifest) return manifest;
+        const now = new Date().toISOString();
+        return {
+          ...manifest,
+          assets: [...manifest.assets.filter((item) => item.id !== asset.id), asset],
+          updatedAt: now,
+        };
       });
     }
 
@@ -395,6 +417,18 @@ export function useInvestigationSession() {
           caseData: mergeCaseMetadata(current.caseData, envelope.payload),
         }));
       }
+
+      if (event === "visual.manifest.ready") {
+        mergeVisualManifest(() => envelope.payload.manifest);
+      }
+
+      if (event === "visual.asset.pending" || event === "visual.asset.ready") {
+        upsertVisualAsset(envelope.payload.asset);
+      }
+
+      if (event === "visual.focus.changed") {
+        setVisualFocus(envelope.payload);
+      }
     }
 
     function handleAgentEvent(event: AgentServerEvent) {
@@ -465,7 +499,7 @@ export function useInvestigationSession() {
 
   const data = useMemo(() => {
     if (!session) return null;
-    return deriveInvestigationData(session.caseData, session.state);
+    return deriveInvestigationData(session.caseData, session.state, session.visualManifest);
   }, [session]);
 
   async function submitCommand(command: string) {
@@ -536,6 +570,7 @@ export function useInvestigationSession() {
     showBriefing,
     chatMessages,
     chatMode,
+    visualFocus,
     submitCommand,
   };
 }

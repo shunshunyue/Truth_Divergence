@@ -22,7 +22,10 @@ import {
   type ChatModeState,
   type InvestigationChatMessage,
   type InvestigationData,
+  type VisualFocusState,
 } from "@/components/investigation/types";
+import { findVisualAsset, visualUrl } from "@/components/investigation/visualAssets";
+import type { CaseVisualManifest, VisualAsset } from "@/game/schemas/visuals";
 import type { CaseData, PlayerCaseState, SuspectState } from "@/game/schemas/game";
 
 const emotionLabels: Record<string, string> = {
@@ -80,6 +83,108 @@ function usePulseFlag(trigger: unknown, duration = 900) {
   }, [trigger, duration]);
 
   return active;
+}
+
+function VisualThumb({
+  asset,
+  className = "h-12 w-12",
+}: {
+  asset?: VisualAsset;
+  className?: string;
+}) {
+  const url = visualUrl(asset, true);
+
+  return (
+    <span className={["relative shrink-0 overflow-hidden border border-[#d8cfba] bg-[#efe8d8]", className].join(" ")}>
+      {url ? (
+        <img alt="" className="h-full w-full object-cover" src={url} />
+      ) : (
+        <span className="absolute inset-0 bg-[linear-gradient(135deg,rgba(36,97,91,0.18),transparent_45%,rgba(157,109,33,0.18))]" />
+      )}
+    </span>
+  );
+}
+
+function VisualStage({
+  chatMode,
+  currentLocation,
+  focus,
+  manifest,
+}: {
+  chatMode: ChatModeState;
+  currentLocation?: InvestigationData["currentLocation"];
+  focus: VisualFocusState;
+  manifest?: CaseVisualManifest;
+}) {
+  const focusedAsset =
+    focus?.assetId && focus.mode !== "case" ? findVisualAsset(manifest, { assetId: focus.assetId }) : undefined;
+  const suspectAsset =
+    chatMode.mode === "interrogation"
+      ? findVisualAsset(manifest, { kind: "suspect_portrait", entityId: chatMode.suspectId })
+      : undefined;
+  const locationAsset = currentLocation ? findVisualAsset(manifest, { kind: "location", entityId: currentLocation.id }) : undefined;
+  const asset = focusedAsset ?? suspectAsset ?? locationAsset;
+  const imageUrl = visualUrl(asset);
+  const title =
+    (focus?.mode !== "case" ? focus?.title : undefined) ??
+    (chatMode.mode === "interrogation" ? chatMode.label : currentLocation?.name) ??
+    "案件现场";
+  const eyebrow =
+    focus?.mode === "evidence"
+      ? "evidence spotlight"
+      : chatMode.mode === "interrogation"
+        ? "interrogation focus"
+        : "current scene";
+
+  if (!imageUrl && !currentLocation && chatMode.mode !== "interrogation") return null;
+
+  return (
+    <motion.div
+      className="mx-auto mb-5 grid max-w-3xl overflow-hidden rounded-lg border border-[#d8cfba] bg-[#fffdf7]/88 shadow-[0_18px_60px_rgba(49,40,28,0.14)] md:grid-cols-[11rem_1fr]"
+      layout
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.22 }}
+    >
+      <div className="relative h-40 md:h-full">
+        {imageUrl ? (
+          <img alt="" className="h-full w-full object-cover" src={imageUrl} />
+        ) : (
+          <div className="h-full w-full bg-[linear-gradient(135deg,rgba(36,97,91,0.18),transparent_45%,rgba(157,109,33,0.2))]" />
+        )}
+        {focus?.intensity === "spotlight" && (
+          <motion.div
+            className="pointer-events-none absolute inset-0 border-2 border-[#e7f05f]"
+            initial={{ opacity: 0.2 }}
+            animate={{ opacity: [0.2, 0.8, 0.2] }}
+            transition={{ duration: 1.2, repeat: 2 }}
+          />
+        )}
+      </div>
+      <div className="p-4">
+        <p className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-[#24615b]">{eyebrow}</p>
+        <h3 className="mt-2 line-clamp-1 text-lg font-black text-[#27241f]">{title}</h3>
+        <p className="mt-2 line-clamp-3 text-xs leading-5 text-[#675d4f]">
+          {focus?.mode === "evidence"
+            ? "这份材料已被归档，图像只呈现可观察细节。"
+            : chatMode.mode === "interrogation"
+              ? "当前画面锁定问询对象，口供和情绪变化会同步到右侧人物状态。"
+              : currentLocation?.description ?? "当前调查视野已同步。"}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+function findEntityVisual(data: InvestigationData, entityId: string) {
+  return (
+    findVisualAsset(data.visualManifest, { kind: "suspect_portrait", entityId }) ??
+    findVisualAsset(data.visualManifest, { kind: "victim_portrait", entityId }) ??
+    findVisualAsset(data.visualManifest, { kind: "witness_portrait", entityId }) ??
+    findVisualAsset(data.visualManifest, { kind: "evidence", entityId }) ??
+    findVisualAsset(data.visualManifest, { kind: "location", entityId }) ??
+    findVisualAsset(data.visualManifest, { kind: "clue_object", entityId })
+  );
 }
 
 export function LeftDrawer({
@@ -204,7 +309,7 @@ export function LeftDrawer({
                       onClick={() => setSelectedLocation(location)}
                       type="button"
                     >
-                      <MapPin size={14} className="shrink-0" />
+                      <VisualThumb asset={findVisualAsset(data.visualManifest, { kind: "location", entityId: location.id })} className="h-10 w-12" />
                       <span className="line-clamp-1 font-semibold">{location.name}</span>
                       {location.id === data.currentLocation?.id && (
                         <span className="ml-auto font-mono text-[0.58rem]">当前</span>
@@ -224,7 +329,7 @@ export function LeftDrawer({
                       onClick={() => setSelectedClue(clue)}
                       type="button"
                     >
-                      <Search size={14} className="mt-0.5 shrink-0 text-[#24615b]" />
+                      <VisualThumb asset={findVisualAsset(data.visualManifest, { kind: "clue_object", entityId: clue.id })} />
                       <span>
                         <span className="block text-sm font-semibold text-[#27241f]">{clue.name}</span>
                         <span className="mt-0.5 block line-clamp-1 text-[0.68rem] text-[#9f9688]">{clue.description}</span>
@@ -245,7 +350,7 @@ export function LeftDrawer({
                       onClick={() => setSelectedEvidence(evidence)}
                       type="button"
                     >
-                      <FileText size={14} className="mt-0.5 shrink-0 text-[#9d6d21]" />
+                      <VisualThumb asset={findVisualAsset(data.visualManifest, { kind: "evidence", entityId: evidence.id })} />
                       <span>
                         <span className="font-mono text-[0.6rem] text-[#9d6d21]">{evidenceTypeLabels[evidence.type] ?? evidence.type}</span>
                         <span className="mt-0.5 block line-clamp-1 text-sm font-semibold text-[#27241f]">{evidence.title}</span>
@@ -262,11 +367,13 @@ export function LeftDrawer({
             {/* Current location card */}
             {data?.currentLocation && (
               <div className="border-t border-[#d8cfba] px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <MapPin size={13} className="text-[#24615b]" />
-                  <span className="text-xs font-semibold text-[#24615b]">{data.currentLocation.name}</span>
+                <div className="flex items-start gap-3">
+                  <VisualThumb asset={findVisualAsset(data.visualManifest, { kind: "location", entityId: data.currentLocation.id })} className="h-12 w-14" />
+                  <div className="min-w-0">
+                    <span className="line-clamp-1 text-xs font-semibold text-[#24615b]">{data.currentLocation.name}</span>
+                    <p className="mt-1 line-clamp-2 text-[0.65rem] leading-4 text-[#776f61]">{data.currentLocation.description}</p>
+                  </div>
                 </div>
-                <p className="mt-1 line-clamp-2 text-[0.65rem] leading-4 text-[#776f61]">{data.currentLocation.description}</p>
               </div>
             )}
           </motion.aside>
@@ -291,6 +398,7 @@ export function LeftDrawer({
               <span className="font-mono text-[0.65rem] text-[#24615b]">场景线索</span>
               <button onClick={() => setSelectedClue(null)} type="button" className="text-[#8b8171] hover:text-[#9d6d21]"><X size={13} /></button>
             </div>
+            <VisualThumb asset={findVisualAsset(data?.visualManifest, { kind: "clue_object", entityId: selectedClue.id })} className="mb-4 h-40 w-full" />
             <h3 className="text-base font-bold text-[#27241f]">{selectedClue.name}</h3>
             <p className="mt-2 text-xs leading-5 text-[#564d42]">{selectedClue.description}</p>
             <button
@@ -322,6 +430,7 @@ export function LeftDrawer({
               <span className="font-mono text-[0.65rem] text-[#24615b]">{selectedLocation.kind}</span>
               <button onClick={() => setSelectedLocation(null)} type="button" className="text-[#8b8171] hover:text-[#9d6d21]"><X size={13} /></button>
             </div>
+            <VisualThumb asset={findVisualAsset(data?.visualManifest, { kind: "location", entityId: selectedLocation.id })} className="mb-4 h-44 w-full" />
             <h3 className="text-base font-bold text-[#27241f]">{selectedLocation.name}</h3>
             <p className="mt-2 text-xs leading-5 text-[#564d42]">{selectedLocation.description}</p>
             {selectedLocation.objects.length > 0 && (
@@ -376,6 +485,7 @@ export function LeftDrawer({
               <span className="font-mono text-[0.62rem] text-[#9d6d21]">{evidenceTypeLabels[selectedEvidence.type] ?? selectedEvidence.type}</span>
               <button onClick={() => setSelectedEvidence(null)} type="button" className="text-[#8b8171] hover:text-[#9d6d21]"><X size={13} /></button>
             </div>
+            <VisualThumb asset={findVisualAsset(data?.visualManifest, { kind: "evidence", entityId: selectedEvidence.id })} className="mb-4 h-44 w-full" />
             <h3 className="text-base font-bold text-[#27241f]">{selectedEvidence.title}</h3>
             <p className="mt-1 font-mono text-[0.6rem] text-[#8b8171]">来源：{selectedEvidence.source}</p>
             {Object.entries(selectedEvidence.visibleData).length > 0 && (
@@ -417,6 +527,8 @@ export function CenterStage({
   phase,
   recommendedCommands,
   setInput,
+  visualFocus,
+  visualManifest,
   onCommand,
 }: {
   activeStep: BootStepId;
@@ -434,6 +546,8 @@ export function CenterStage({
   phase?: PlayerCaseState["phase"];
   recommendedCommands: string[];
   setInput: (value: string) => void;
+  visualFocus: VisualFocusState;
+  visualManifest?: CaseVisualManifest;
   onCommand: (command: string) => void;
 }) {
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -566,6 +680,12 @@ export function CenterStage({
               )}
             </AnimatePresence>
             <div className="mx-auto flex max-w-3xl flex-col gap-4">
+              <VisualStage
+                chatMode={chatMode}
+                currentLocation={currentLocation}
+                focus={visualFocus}
+                manifest={visualManifest}
+              />
               {chatMessages.length === 0 && (
                 <div className="rounded-lg border border-[#d8cfba] bg-white/82 p-5 shadow-[0_18px_60px_rgba(49,40,28,0.12)]">
                   <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#24615b]">secured copilot workspace</p>
@@ -733,6 +853,7 @@ export function RightRail({
   data,
   isBooting,
   state,
+  visualFocus,
   onOpenRelationship,
   onOpenTimeline,
 }: {
@@ -742,6 +863,7 @@ export function RightRail({
   data: InvestigationData | null;
   isBooting: boolean;
   state?: PlayerCaseState;
+  visualFocus: VisualFocusState;
   onOpenRelationship: () => void;
   onOpenTimeline: () => void;
 }) {
@@ -842,7 +964,15 @@ export function RightRail({
               <div className="mt-2 flex flex-col gap-2">
                 {data.visibleSuspects.map((suspect) => {
                   const ss = state.suspectStates[suspect.id];
-                  return <SuspectStatusCard key={suspect.id} name={suspect.name} state={ss} />;
+                  return (
+                    <SuspectStatusCard
+                      key={suspect.id}
+                      active={visualFocus?.mode === "suspect" && visualFocus.entityId === suspect.id}
+                      asset={findVisualAsset(data.visualManifest, { kind: "suspect_portrait", entityId: suspect.id })}
+                      name={suspect.name}
+                      state={ss}
+                    />
+                  );
                 })}
               </div>
             </motion.div>
@@ -870,14 +1000,15 @@ export function RightRail({
   );
 }
 
-function NodeBadge({ label }: { label: string }) {
+function NodeBadge({ asset, label }: { asset?: VisualAsset; label: string }) {
   return (
     <motion.div
-      className="grid min-h-12 place-items-center border border-[#d8cfba] bg-[#fff5db] p-2 text-center"
+      className="grid min-h-16 place-items-center gap-1 border border-[#d8cfba] bg-[#fff5db] p-2 text-center"
       initial={{ opacity: 0, y: 5 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
     >
+      <VisualThumb asset={asset} className="h-9 w-9 rounded-md" />
       <span className="line-clamp-2 text-xs font-semibold text-[#27241f]">{label}</span>
     </motion.div>
   );
@@ -924,7 +1055,17 @@ function TruthGauge({ score, delta, pulse }: { score: number; delta: number; pul
   );
 }
 
-function SuspectStatusCard({ name, state }: { name: string; state?: SuspectState }) {
+function SuspectStatusCard({
+  active,
+  asset,
+  name,
+  state,
+}: {
+  active: boolean;
+  asset?: VisualAsset;
+  name: string;
+  state?: SuspectState;
+}) {
   const pressure = state?.pressure ?? 0;
   const suspicion = state?.suspicion ?? 0;
   const trust = state?.trust ?? 0;
@@ -942,6 +1083,7 @@ function SuspectStatusCard({ name, state }: { name: string; state?: SuspectState
       className={[
         "border p-3",
         unstable ? "td-divergence" : "",
+        active ? "border-[#b86956] shadow-[0_12px_32px_rgba(166,78,59,0.16)]" : "",
         trustRose ? "bg-[#fff5db]" : "bg-[#f4efe5]",
       ].join(" ")}
       animate={
@@ -955,8 +1097,8 @@ function SuspectStatusCard({ name, state }: { name: string; state?: SuspectState
       transition={{ duration: 0.42, ease: "easeOut" }}
     >
       <div className="flex items-center gap-2">
-        <motion.span animate={changed ? { scale: [1, 1.12, 1] } : { scale: 1 }} transition={{ duration: 0.32 }}>
-          <UserRound size={15} className="shrink-0 text-[#a64e3b]" />
+        <motion.span animate={changed || active ? { scale: [1, 1.08, 1] } : { scale: 1 }} transition={{ duration: 0.32 }}>
+          <VisualThumb asset={asset} className="h-10 w-10 rounded-md" />
         </motion.span>
         <div className="min-w-0">
           <p className="line-clamp-1 text-xs font-semibold text-[#27241f]">{name}</p>
@@ -1065,7 +1207,7 @@ export function RelationshipModal({
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.045, duration: 0.22 }}
                 >
-                  <NodeBadge label={data.entityNameById.get(rel.from) ?? rel.from} />
+                  <NodeBadge asset={findEntityVisual(data, rel.from)} label={data.entityNameById.get(rel.from) ?? rel.from} />
                   <div className="grid place-items-center text-[#9d6d21]">
                     <svg className="h-5 w-12 overflow-visible" viewBox="0 0 48 20" aria-hidden="true">
                       <motion.path
@@ -1087,7 +1229,7 @@ export function RelationshipModal({
                       {rel.status}
                     </motion.span>
                   </div>
-                  <NodeBadge label={data.entityNameById.get(rel.to) ?? rel.to} />
+                  <NodeBadge asset={findEntityVisual(data, rel.to)} label={data.entityNameById.get(rel.to) ?? rel.to} />
                   <p className="col-span-3 text-center text-xs text-[#675d4f]">{rel.label}</p>
                 </motion.div>
               ))}
@@ -1102,9 +1244,11 @@ export function RelationshipModal({
 }
 
 export function TimelineModal({
+  data,
   state,
   onClose,
 }: {
+  data: InvestigationData;
   state: PlayerCaseState;
   onClose: () => void;
 }) {
@@ -1131,7 +1275,7 @@ export function TimelineModal({
               {state.playerTimeline.map((event, index) => (
                 <motion.li
                   key={event.id}
-                  className="grid grid-cols-[3.5rem_1fr] items-start gap-3"
+                  className="grid grid-cols-[3.5rem_3rem_1fr] items-start gap-3"
                   initial={{ opacity: 0, x: -8 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.05, duration: 0.2 }}
@@ -1144,6 +1288,7 @@ export function TimelineModal({
                   >
                     {event.time}
                   </motion.span>
+                  <VisualThumb asset={findEntityVisual(data, event.source)} className="h-12 w-12 rounded-md" />
                   <p className="relative border-l border-[#cfa65b] pl-3 text-xs leading-5 text-[#3d352b]">
                     <motion.span
                       className="absolute -left-[3px] top-1 h-1.5 w-1.5 rounded-full bg-[#24615b]"

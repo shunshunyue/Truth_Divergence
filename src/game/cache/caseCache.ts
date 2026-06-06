@@ -1,15 +1,19 @@
 import mysql from "mysql2/promise";
 import { randomUUID } from "crypto";
 import { caseDataSchema, playerCaseStateSchema, type CaseData, type PlayerCaseState } from "@/game/schemas/game";
+import { caseVisualManifestSchema, type CaseVisualManifest } from "@/game/schemas/visuals";
 import type { GeneratedSession } from "@/ai/caseGenerator";
 
 type CacheStatus = "ready" | "used" | "generating" | "failed";
+type VisualStatus = "pending" | "ready" | "failed" | "disabled";
 
 export type CachedCaseRecord = {
   id: string;
   status: CacheStatus;
   caseData: CaseData;
   state: PlayerCaseState;
+  visualManifest?: CaseVisualManifest;
+  visualStatus?: VisualStatus | null;
   errorMessage?: string | null;
 };
 
@@ -45,6 +49,22 @@ async function ensureDatabase() {
   }
 }
 
+async function columnExists(tableName: string, columnName: string) {
+  const databaseName = databaseNameFromUrl();
+  const [rows] = await pool.query<mysql.RowDataPacket[]>(
+    `SELECT COUNT(*) AS total
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [databaseName, tableName, columnName],
+  );
+  return Number(rows[0]?.total ?? 0) > 0;
+}
+
+async function addColumnIfMissing(tableName: string, columnName: string, definition: string) {
+  if (await columnExists(tableName, columnName)) return;
+  await pool.query(`ALTER TABLE \`${tableName}\` ADD COLUMN ${definition}`);
+}
+
 export async function ensureCaseCacheSchema() {
   if (initialized) return;
 
@@ -57,6 +77,10 @@ export async function ensureCaseCacheSchema() {
       case_theme VARCHAR(255) NULL,
       case_data JSON NULL,
       player_state JSON NULL,
+      visual_manifest JSON NULL,
+      visual_status ENUM('pending','ready','failed','disabled') NULL,
+      visual_error_message TEXT NULL,
+      visual_generated_at DATETIME NULL,
       ai_page JSON NULL,
       error_message TEXT NULL,
       used_at DATETIME NULL,
@@ -66,6 +90,14 @@ export async function ensureCaseCacheSchema() {
       INDEX idx_used_at (used_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await addColumnIfMissing("ai_case_cache", "visual_manifest", "visual_manifest JSON NULL");
+  await addColumnIfMissing(
+    "ai_case_cache",
+    "visual_status",
+    "visual_status ENUM('pending','ready','failed','disabled') NULL",
+  );
+  await addColumnIfMissing("ai_case_cache", "visual_error_message", "visual_error_message TEXT NULL");
+  await addColumnIfMissing("ai_case_cache", "visual_generated_at", "visual_generated_at DATETIME NULL");
 
   initialized = true;
 }
@@ -77,11 +109,14 @@ function parseJsonColumn(value: unknown) {
 }
 
 function parseRecord(row: Record<string, unknown>): CachedCaseRecord {
+  const rawVisualManifest = row.visual_manifest ? parseJsonColumn(row.visual_manifest) : undefined;
   return {
     id: String(row.id),
     status: row.status as CacheStatus,
     caseData: caseDataSchema.parse(parseJsonColumn(row.case_data)),
     state: playerCaseStateSchema.parse(parseJsonColumn(row.player_state)),
+    visualManifest: rawVisualManifest ? caseVisualManifestSchema.parse(rawVisualManifest) : undefined,
+    visualStatus: row.visual_status ? (String(row.visual_status) as VisualStatus) : null,
     errorMessage: row.error_message ? String(row.error_message) : null,
   };
 }
@@ -96,17 +131,22 @@ export async function countReadyCases() {
 
 export async function insertReadyCase(session: GeneratedSession) {
   await ensureCaseCacheSchema();
-  const id = randomUUID();
+  const id = session.visualManifest?.cacheId ?? randomUUID();
+  const visualStatus: VisualStatus = session.visualManifest ? "ready" : "disabled";
 
   await pool.execute(
-    `INSERT INTO ai_case_cache (id, status, case_title, case_theme, case_data, player_state)
-     VALUES (?, 'ready', ?, ?, ?, ?)`,
+    `INSERT INTO ai_case_cache
+       (id, status, case_title, case_theme, case_data, player_state, visual_manifest, visual_status, visual_generated_at)
+     VALUES (?, 'ready', ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       session.caseData.title,
       session.caseData.theme,
       JSON.stringify(session.caseData),
       JSON.stringify(session.state),
+      session.visualManifest ? JSON.stringify({ ...session.visualManifest, cacheId: id }) : null,
+      visualStatus,
+      session.visualManifest ? new Date() : null,
     ],
   );
 
@@ -134,7 +174,7 @@ export async function claimRandomReadyCase() {
     const [rows] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT * FROM ai_case_cache
        WHERE status = 'ready'
-       ORDER BY RAND()
+       ORDER BY (visual_status = 'ready') DESC, RAND()
        LIMIT 1
        FOR UPDATE`,
     );
@@ -157,6 +197,34 @@ export async function claimRandomReadyCase() {
   } finally {
     connection.release();
   }
+}
+
+export async function listReadyCasesMissingVisuals(limit = 5) {
+  await ensureCaseCacheSchema();
+  const [rows] = await pool.query<mysql.RowDataPacket[]>(
+    `SELECT * FROM ai_case_cache
+     WHERE status = 'ready' AND (visual_manifest IS NULL OR visual_status IS NULL OR visual_status <> 'ready')
+     ORDER BY created_at ASC
+     LIMIT ?`,
+    [limit],
+  );
+  return rows.map((row) => parseRecord(row));
+}
+
+export async function updateCaseVisualManifest(id: string, visualManifest: CaseVisualManifest, visualErrorMessage?: string) {
+  await ensureCaseCacheSchema();
+  const hasFailedAssets = visualManifest.assets.some((asset) => asset.status === "failed");
+  await pool.execute(
+    `UPDATE ai_case_cache
+     SET visual_manifest = ?, visual_status = ?, visual_error_message = ?, visual_generated_at = NOW()
+     WHERE id = ?`,
+    [
+      JSON.stringify({ ...visualManifest, cacheId: id }),
+      hasFailedAssets ? "failed" : "ready",
+      visualErrorMessage ?? null,
+      id,
+    ],
+  );
 }
 
 export async function closeCaseCachePool() {

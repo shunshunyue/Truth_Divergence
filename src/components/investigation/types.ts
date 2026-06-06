@@ -1,9 +1,11 @@
 import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
+import type { CaseVisualManifest, VisualFocusPayload } from "@/game/schemas/visuals";
 
 export type SessionPayload = {
   sessionId: string;
   caseData: CaseData;
   state: PlayerCaseState;
+  visualManifest?: CaseVisualManifest;
   resultText?: string;
 };
 
@@ -36,7 +38,10 @@ export type InvestigationData = {
   unlockedLocations: CaseData["locations"];
   visibleRelationships: CaseData["relationships"];
   visibleSuspects: CaseData["suspects"];
+  visualManifest?: CaseVisualManifest;
 };
+
+export type VisualFocusState = VisualFocusPayload | null;
 
 export const bootSteps: Array<{ id: BootStepId; title: string; text: string }> = [
   { id: "core", title: "案件核心", text: "从缓存池领取一个未使用案件。" },

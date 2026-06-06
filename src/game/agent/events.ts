@@ -1,4 +1,5 @@
 import type { CaseData, ParsedAction, PlayerCaseState } from "@/game/schemas/game";
+import type { CaseVisualManifest, VisualAsset, VisualFocusPayload } from "@/game/schemas/visuals";
 
 export type AgentEventChannel = "metadata" | "game" | "agent";
 export type AgentEventPriority = "critical" | "normal" | "background";
@@ -21,6 +22,7 @@ export type AgentSessionPayload = {
   sessionId: string;
   caseData: CaseData;
   state: PlayerCaseState;
+  visualManifest?: CaseVisualManifest;
   resultText?: string;
 };
 
@@ -145,6 +147,35 @@ export type AgentRuntimeEvent =
       event: "metadata.patch";
       channel: "metadata";
       payload: AgentMetadataPatchPayload;
+    }
+  | {
+      event: "visual.manifest.ready";
+      channel: "metadata";
+      payload: {
+        sessionId: string;
+        manifest: CaseVisualManifest;
+      };
+    }
+  | {
+      event: "visual.asset.pending";
+      channel: "metadata";
+      payload: {
+        sessionId: string;
+        asset: VisualAsset;
+      };
+    }
+  | {
+      event: "visual.asset.ready";
+      channel: "metadata";
+      payload: {
+        sessionId: string;
+        asset: VisualAsset;
+      };
+    }
+  | {
+      event: "visual.focus.changed";
+      channel: "metadata";
+      payload: VisualFocusPayload;
     };
 
 export type AgentEventEnvelope = AgentRuntimeEvent & {

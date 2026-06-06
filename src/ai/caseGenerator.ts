@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { hasAiCredentials, requestAiJsonStream } from "@/ai/client";
 import { caseDataSchema, type CaseData, type PlayerCaseState } from "@/game/schemas/game";
+import type { CaseVisualManifest } from "@/game/schemas/visuals";
 import { createInitialPlayerState } from "@/game/engine/state";
 
 const generatedSessionSchema = z.object({
@@ -10,6 +11,7 @@ const generatedSessionSchema = z.object({
 export type GeneratedSession = {
   caseData: CaseData;
   state: PlayerCaseState;
+  visualManifest?: CaseVisualManifest;
 };
 
 function schemaContract() {

@@ -1,7 +1,12 @@
 import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
+import type { CaseVisualManifest } from "@/game/schemas/visuals";
 import type { InvestigationData } from "@/components/investigation/types";
 
-export function deriveInvestigationData(caseData: CaseData, state: PlayerCaseState): InvestigationData {
+export function deriveInvestigationData(
+  caseData: CaseData,
+  state: PlayerCaseState,
+  visualManifest?: CaseVisualManifest,
+): InvestigationData {
   const currentLocation = caseData.locations.find((location) => location.id === state.currentLocation);
   const discoveredEvidence = caseData.evidence.filter((evidence) => state.discoveredEvidence.includes(evidence.id));
   const visibleSuspects = caseData.suspects.filter((suspect) => state.visibleSuspects.includes(suspect.id));
@@ -40,5 +45,6 @@ export function deriveInvestigationData(caseData: CaseData, state: PlayerCaseSta
     unlockedLocations,
     visibleRelationships,
     visibleSuspects,
+    visualManifest,
   };
 }
