@@ -9,7 +9,7 @@ export function findVisualAsset(
     if (options.assetId && asset.id !== options.assetId) return false;
     if (options.kind && asset.kind !== options.kind) return false;
     if (options.entityId && asset.entityId !== options.entityId) return false;
-    return Boolean(asset.fileUrl || asset.thumbUrl);
+    return asset.status === "pending" || Boolean(asset.fileUrl || asset.thumbUrl);
   });
 }
 

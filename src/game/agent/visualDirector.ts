@@ -100,7 +100,7 @@ function fallbackVisualFocus({
 function buildVisualDirectorPrompt(options: VisualDirectorOptions) {
   return [
     "你是推理游戏的视觉导演。你只能从玩家当前可见的地点、人物和证据中选择一个画面焦点。",
-    "不要选择未出现的人物，不要选择未发现的证据，不要暗示凶手或真相。",
+    "不要选择未出现的人物，不要选择未发现的证据，不要暗示最终责任人或真相。",
     "如果玩家正在审问某人，优先聚焦该人物；如果本轮刚发现证据，优先聚焦证据；否则聚焦当前地点。",
     "只返回严格 JSON。",
     "",

@@ -1,5 +1,5 @@
 import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
-import type { CaseVisualManifest, VisualFocusPayload } from "@/game/schemas/visuals";
+import type { CaseVisualManifest, VisualAsset, VisualFocusPayload } from "@/game/schemas/visuals";
 
 export type SessionPayload = {
   sessionId: string;
@@ -20,6 +20,7 @@ export type InvestigationChatMessage = {
   text: string;
   label?: string;
   suspectId?: string;
+  attachments?: VisualAsset[];
   pending?: boolean;
   placeholder?: boolean;
   clientPending?: boolean;
@@ -53,7 +54,7 @@ export const bootSteps: Array<{ id: BootStepId; title: string; text: string }> =
 ];
 
 export const phaseLabels: Record<PlayerCaseState["phase"], string> = {
-  opening: "案发播报",
+  opening: "事件播报",
   investigating: "调查循环",
   closing: "接近真相",
   solved: "自动结案",

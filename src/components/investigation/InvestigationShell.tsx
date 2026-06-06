@@ -7,7 +7,9 @@ import {
   FileText,
   Fingerprint,
   GitBranch,
+  ImageIcon,
   MapPin,
+  Maximize2,
   Search,
   Send,
   UserRound,
@@ -52,6 +54,159 @@ const evidenceTypeLabels: Record<string, string> = {
   MAP: "地图",
 };
 
+const visualKindLabels: Record<VisualAsset["kind"], string> = {
+  case_cover: "案件背景",
+  location: "现场影像",
+  suspect_portrait: "人物头像",
+  witness_portrait: "证人头像",
+  victim_portrait: "当事人肖像",
+  clue_object: "线索特写",
+  evidence: "证据影像",
+  timeline_event: "时间线影像",
+  relationship_node: "关系图像",
+};
+
+type EvidenceItem = InvestigationData["discoveredEvidence"][number];
+
+const evidenceVisibleDataLabels: Record<string, string> = {
+  visualSubject: "证据本体",
+  visualCarrier: "载体",
+  timeWindow: "时间",
+  locationCue: "地点",
+  abnormalPoint: "异常点",
+  operator: "操作人",
+  actor: "关联人员",
+  person: "关联人员",
+  suspect: "关联人员",
+  witness: "关联证人",
+  vehicle: "车辆",
+  vehicleId: "车辆",
+  plate: "车牌",
+  entryTime: "进入时间",
+  exitTime: "离开时间",
+  accessTime: "门禁时间",
+  recordTime: "记录时间",
+  status: "记录状态",
+  result: "记录结果",
+};
+
+const evidenceVisibleDataOrder = [
+  "visualSubject",
+  "visualCarrier",
+  "timeWindow",
+  "locationCue",
+  "abnormalPoint",
+  "operator",
+  "actor",
+  "person",
+  "suspect",
+  "witness",
+  "vehicle",
+  "vehicleId",
+  "plate",
+  "entryTime",
+  "exitTime",
+  "accessTime",
+  "recordTime",
+  "status",
+  "result",
+];
+
+const evidenceInternalVisibleKeys = new Set([
+  "summary",
+  "visibleDetails",
+  "visualTemplate",
+  "imagePrompt",
+  "prompt",
+  "caption",
+  "description",
+  "style",
+]);
+
+function compactDisplayValue(value: unknown): string {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.map(compactDisplayValue).filter(Boolean).join("、");
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).map(compactDisplayValue).filter(Boolean).join("、");
+  }
+  if (typeof value === "boolean") return value ? "是" : "否";
+  return String(value).replace(/\s+/g, " ").trim();
+}
+
+function evidenceVisibleSummary(evidence: EvidenceItem) {
+  return compactDisplayValue(evidence.visibleData.summary);
+}
+
+function evidenceVisibleDetails(evidence: EvidenceItem) {
+  const raw = evidence.visibleData.visibleDetails;
+  const values = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[；;\n]/) : [];
+  return values.map(compactDisplayValue).filter(Boolean).slice(0, 5);
+}
+
+function evidenceDetailRows(evidence: EvidenceItem) {
+  const used = new Set<string>();
+  const rows: Array<{ key: string; label: string; value: string }> = [];
+
+  const pushRow = (key: string, label: string) => {
+    if (used.has(key) || evidenceInternalVisibleKeys.has(key)) return;
+    const value = compactDisplayValue(evidence.visibleData[key]);
+    if (!value) return;
+    rows.push({ key, label, value });
+    used.add(key);
+  };
+
+  evidenceVisibleDataOrder.forEach((key) => pushRow(key, evidenceVisibleDataLabels[key]));
+  Object.keys(evidence.visibleData).forEach((key) => {
+    if (!/[\u4e00-\u9fff]/.test(key)) return;
+    pushRow(key, key);
+  });
+
+  return rows.slice(0, 8);
+}
+
+function comparableEvidenceLine(value: string) {
+  return value
+    .replace(/^[\u4e00-\u9fff]{1,8}[：:]/, "")
+    .replace(/[，。；;、,\s]/g, "")
+    .toLowerCase();
+}
+
+function isDuplicateEvidenceLine(a: string, b: string) {
+  const left = comparableEvidenceLine(a);
+  const right = comparableEvidenceLine(b);
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+function uniqueEvidenceLines(values: string[], max = 3) {
+  const lines: string[] = [];
+  values.forEach((value) => {
+    const line = compactDisplayValue(value);
+    if (!line || lines.some((existing) => isDuplicateEvidenceLine(existing, line))) return;
+    lines.push(line);
+  });
+  return lines.slice(0, max);
+}
+
+function evidenceModalContent(evidence: EvidenceItem, asset?: VisualAsset) {
+  const rowLines = evidenceDetailRows(evidence)
+    .filter((row) => row.key !== "visualSubject" && row.key !== "visualCarrier")
+    .map((row) => `${row.label}：${row.value}`);
+  const candidates = uniqueEvidenceLines([
+    ...evidenceVisibleDetails(evidence),
+    ...rowLines,
+    ...(asset?.plotClues ?? []),
+  ], 6);
+  const summary = evidenceVisibleSummary(evidence);
+  const keyFinding = summary || candidates[0] || compactDisplayValue(asset?.caption) || compactDisplayValue(asset?.description);
+  const detailLines = uniqueEvidenceLines(
+    candidates.filter((line) => !keyFinding || !isDuplicateEvidenceLine(line, keyFinding)),
+    3,
+  );
+
+  return { keyFinding, detailLines };
+}
+
 function shortText(value: string | undefined, max = 34) {
   if (!value) return "";
   return value.length > max ? `${value.slice(0, max)}...` : value;
@@ -93,21 +248,304 @@ function VisualThumb({
   className?: string;
 }) {
   const url = visualUrl(asset, true);
+  if (!url) return null;
+
+  const isPending = asset?.status === "pending";
 
   return (
     <span className={["relative shrink-0 overflow-hidden border border-[#d8cfba] bg-[#efe8d8]", className].join(" ")}>
-      {url ? (
-        <img alt="" className="h-full w-full object-cover" src={url} />
-      ) : (
-        <span className="absolute inset-0 bg-[linear-gradient(135deg,rgba(36,97,91,0.18),transparent_45%,rgba(157,109,33,0.18))]" />
+      <img alt="" className="h-full w-full object-cover" src={url} />
+      {isPending && (
+        <span className="absolute inset-0 grid place-items-center bg-[#fffdf7]/78 px-1 text-center">
+          <span className="flex flex-col items-center gap-1">
+            <motion.span
+              className="h-4 w-4 rounded-full border border-[#24615b]/30 border-t-[#24615b]"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 0.9, ease: "linear", repeat: Infinity }}
+            />
+            <span className="font-mono text-[0.52rem] leading-none text-[#24615b]">整理中</span>
+          </span>
+        </span>
       )}
     </span>
   );
 }
 
+function VisualInlineStatus({ asset }: { asset?: VisualAsset }) {
+  if (asset?.status === "pending") {
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 rounded-sm border border-[#b8d8d2] bg-[#e8f6f2] px-1.5 py-0.5 font-mono text-[0.56rem] text-[#24615b]">
+        <motion.span
+          className="h-1.5 w-1.5 rounded-full bg-[#24615b]"
+          animate={{ opacity: [0.35, 1, 0.35] }}
+          transition={{ duration: 0.9, repeat: Infinity }}
+        />
+        影像整理中
+      </span>
+    );
+  }
+  if (asset?.status === "failed") {
+    return (
+      <span className="mt-1 inline-flex rounded-sm border border-[#d0a092] bg-[#fff0ea] px-1.5 py-0.5 font-mono text-[0.56rem] text-[#a64e3b]">
+        影像待重试
+      </span>
+    );
+  }
+  return null;
+}
+
+function ChatVisualAttachmentGrid({
+  assets,
+  onOpen,
+}: {
+  assets: VisualAsset[];
+  onOpen: (asset: VisualAsset) => void;
+}) {
+  const visibleAssets = assets.filter((asset) => visualUrl(asset, true));
+  if (!visibleAssets.length) return null;
+
+  return (
+    <motion.div
+      className="grid gap-2 sm:grid-cols-2"
+      initial={{ opacity: 0, y: 5 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18 }}
+    >
+      {visibleAssets.map((asset) => {
+        const imageUrl = visualUrl(asset, true);
+        return (
+          <button
+            key={asset.id}
+            className="group relative overflow-hidden rounded-md border border-[#d8cfba] bg-[#fffdf7]/92 p-2 text-left shadow-[0_12px_34px_rgba(49,40,28,0.12)] transition hover:border-[#cfa65b] hover:bg-[#fffaf0]"
+            onClick={() => onOpen(asset)}
+            type="button"
+          >
+            <div className="relative h-28 overflow-hidden rounded-[4px] border border-[#e2d7c1] bg-[#efe8d8]">
+              {imageUrl ? (
+                <img alt="" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" src={imageUrl} />
+              ) : (
+                <span className="absolute inset-0 bg-[linear-gradient(135deg,rgba(36,97,91,0.18),transparent_45%,rgba(157,109,33,0.18))]" />
+              )}
+              <span className="absolute left-2 top-2 flex items-center gap-1 rounded-sm border border-[#fffdf7]/70 bg-[#fffdf7]/86 px-1.5 py-0.5 font-mono text-[0.56rem] text-[#24615b] shadow-sm">
+                <ImageIcon size={10} /> {visualKindLabels[asset.kind]}
+              </span>
+              <span className="absolute bottom-2 right-2 grid h-6 w-6 place-items-center rounded-sm bg-[#27241f]/72 text-[#fffdf7] opacity-0 transition group-hover:opacity-100">
+                <Maximize2 size={12} />
+              </span>
+            </div>
+            <div className="mt-2 min-w-0">
+              <p className="line-clamp-1 text-xs font-bold text-[#27241f]">{asset.title}</p>
+              <p className="mt-1 line-clamp-2 text-[0.68rem] leading-4 text-[#6a6256]">
+                {asset.caption || asset.description || "这张影像已同步到侧边索引。"}
+              </p>
+            </div>
+          </button>
+        );
+      })}
+    </motion.div>
+  );
+}
+
+function VisualAttachmentModal({
+  asset,
+  onClose,
+  onPrompt,
+}: {
+  asset: VisualAsset;
+  onClose: () => void;
+  onPrompt?: (prompt: string) => void;
+}) {
+  const imageUrl = visualUrl(asset);
+  const plotClues = asset.plotClues.slice(0, 5);
+  const prompts = asset.investigationPrompts.slice(0, 4);
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/42 p-4 backdrop-blur"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="relative grid max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-lg border border-[#cfa65b] bg-[#fffdf7] shadow-[0_28px_100px_rgba(31,25,17,0.34)] md:grid-cols-[minmax(0,1fr)_18rem]"
+        initial={{ opacity: 0, y: 14, scale: 0.985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.985 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      >
+        <div className="relative min-h-[18rem] bg-[#efe8d8] md:min-h-[34rem]">
+          {imageUrl ? (
+            <img alt="" className="h-full max-h-[70vh] w-full object-contain md:max-h-[92vh]" src={imageUrl} />
+          ) : (
+            <div className="h-full w-full bg-[linear-gradient(135deg,rgba(36,97,91,0.18),transparent_45%,rgba(157,109,33,0.18))]" />
+          )}
+          <div className="pointer-events-none absolute inset-0 border-[10px] border-[#fffdf7]/22" />
+        </div>
+        <aside className="flex min-h-0 flex-col border-t border-[#d8cfba] p-5 md:border-l md:border-t-0">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-[#24615b]">{visualKindLabels[asset.kind]}</p>
+              <h3 className="mt-2 text-lg font-black leading-tight text-[#27241f]">{asset.title}</h3>
+            </div>
+            <button className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#8b8171] hover:bg-[#f4efe5] hover:text-[#9d6d21]" onClick={onClose} type="button">
+              <X size={15} />
+            </button>
+          </div>
+          <p className="text-sm leading-6 text-[#5f564a]">{asset.description || asset.caption || "影像内容已归档。"}</p>
+          {asset.caption && asset.caption !== asset.description && (
+            <p className="mt-3 border-l-2 border-[#b8d8d2] pl-3 text-xs leading-5 text-[#24615b]">{asset.caption}</p>
+          )}
+          {plotClues.length > 0 && (
+            <div className="mt-4 border border-[#d8cfba] bg-[#f8f3e8] p-3">
+              <p className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-[#9d6d21]">图上可追点</p>
+              <div className="mt-2 grid gap-1.5">
+                {plotClues.map((clue) => (
+                  <p key={clue} className="border-l-2 border-[#cfa65b] pl-2 text-xs leading-5 text-[#3d352b]">
+                    {clue}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+          {prompts.length > 0 && onPrompt && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {prompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  className="inline-flex items-center gap-1 rounded-sm border border-[#b8d8d2] bg-[#e8f6f2] px-2 py-1 font-mono text-[0.58rem] text-[#24615b] hover:border-[#24615b]"
+                  onClick={() => {
+                    onPrompt(prompt);
+                    onClose();
+                  }}
+                  type="button"
+                >
+                  <Search size={11} /> {shortText(prompt, 22)}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="mt-auto pt-5">
+            <div className="flex flex-wrap gap-1.5">
+              {asset.tags.slice(0, 5).map((tag) => (
+                <span key={tag} className="rounded-sm border border-[#d8cfba] bg-[#f4efe5] px-2 py-0.5 font-mono text-[0.58rem] text-[#8b8171]">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        </aside>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+export function VisualReadyModal({
+  asset,
+  onClose,
+  onPrompt,
+}: {
+  asset: VisualAsset;
+  onClose: () => void;
+  onPrompt?: (prompt: string) => void;
+}) {
+  const imageUrl = visualUrl(asset);
+  const plotClues = asset.plotClues.slice(0, 3);
+  const prompts = asset.investigationPrompts.slice(0, 3);
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[60] grid place-items-center bg-[#27241f]/36 p-4 backdrop-blur"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-3xl overflow-hidden rounded-lg border border-[#cfa65b] bg-[#fffdf7] shadow-[0_26px_90px_rgba(31,25,17,0.32)]"
+        initial={{ opacity: 0, y: 16, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 10, scale: 0.985 }}
+        transition={{ duration: 0.22, ease: "easeOut" }}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      >
+        <div className="grid md:grid-cols-[minmax(0,1fr)_17rem]">
+          <div className="relative min-h-72 bg-[#efe8d8]">
+            {imageUrl ? (
+              <img alt="" className="h-full max-h-[72vh] w-full object-contain" src={imageUrl} />
+            ) : (
+              <div className="h-full w-full bg-[linear-gradient(135deg,rgba(36,97,91,0.18),transparent_45%,rgba(157,109,33,0.18))]" />
+            )}
+            <motion.span
+              className="td-stamp absolute left-5 top-5 rotate-[-7deg] border-[#9d6d21] bg-[#fffdf7]/82 px-3 py-1 text-[#9d6d21]"
+              initial={{ opacity: 0, scale: 1.35, rotate: -15 }}
+              animate={{ opacity: 0.9, scale: 1, rotate: -7 }}
+              transition={{ delay: 0.12, duration: 0.24 }}
+            >
+              archived
+            </motion.span>
+          </div>
+          <aside className="flex flex-col border-t border-[#d8cfba] p-5 md:border-l md:border-t-0">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-[#24615b]">新影像入档</p>
+                <h3 className="mt-2 text-lg font-black leading-tight text-[#27241f]">{asset.title}</h3>
+              </div>
+              <button className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#8b8171] hover:bg-[#f4efe5] hover:text-[#9d6d21]" onClick={onClose} type="button">
+                <X size={15} />
+              </button>
+            </div>
+            <p className="text-sm leading-6 text-[#5f564a]">
+              {asset.caption || asset.description || "后台整理完成，影像已经同步到左侧索引。"}
+            </p>
+            {plotClues.length > 0 && (
+              <div className="mt-4 border border-[#d8cfba] bg-[#f8f3e8] p-3">
+                <p className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-[#9d6d21]">图上可追点</p>
+                <div className="mt-2 grid gap-1.5">
+                  {plotClues.map((clue) => (
+                    <p key={clue} className="border-l-2 border-[#cfa65b] pl-2 text-xs leading-5 text-[#3d352b]">
+                      {clue}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="mt-auto flex flex-col gap-2 pt-5">
+              {prompts.length > 0 && onPrompt && (
+                <div className="flex flex-wrap gap-1.5">
+                  {prompts.map((prompt) => (
+                    <button
+                      key={prompt}
+                      className="inline-flex items-center gap-1 rounded-sm border border-[#b8d8d2] bg-[#e8f6f2] px-2 py-1 font-mono text-[0.58rem] text-[#24615b] hover:border-[#24615b]"
+                      onClick={() => {
+                        onPrompt(prompt);
+                        onClose();
+                      }}
+                      type="button"
+                    >
+                      <Search size={11} /> {shortText(prompt, 20)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-[#143b37] bg-[#163c3a] px-3 font-mono text-xs font-bold text-[#eafffb] hover:bg-[#24615b]"
+                onClick={onClose}
+                type="button"
+              >
+                <ImageIcon size={13} /> 收入案卷
+              </button>
+            </div>
+          </aside>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function VisualStage({
   chatMode,
-  currentLocation,
   focus,
   manifest,
 }: {
@@ -117,26 +555,27 @@ function VisualStage({
   manifest?: CaseVisualManifest;
 }) {
   const focusedAsset =
-    focus?.assetId && focus.mode !== "case" ? findVisualAsset(manifest, { assetId: focus.assetId }) : undefined;
+    focus?.assetId && (focus.mode === "suspect" || focus.mode === "evidence")
+      ? findVisualAsset(manifest, { assetId: focus.assetId })
+      : undefined;
   const suspectAsset =
     chatMode.mode === "interrogation"
       ? findVisualAsset(manifest, { kind: "suspect_portrait", entityId: chatMode.suspectId })
       : undefined;
-  const locationAsset = currentLocation ? findVisualAsset(manifest, { kind: "location", entityId: currentLocation.id }) : undefined;
-  const asset = focusedAsset ?? suspectAsset ?? locationAsset;
+  const asset = focusedAsset ?? suspectAsset;
   const imageUrl = visualUrl(asset);
   const title =
     (focus?.mode !== "case" ? focus?.title : undefined) ??
-    (chatMode.mode === "interrogation" ? chatMode.label : currentLocation?.name) ??
-    "案件现场";
+    (chatMode.mode === "interrogation" ? chatMode.label : undefined) ??
+    "调查焦点";
   const eyebrow =
     focus?.mode === "evidence"
       ? "evidence spotlight"
       : chatMode.mode === "interrogation"
         ? "interrogation focus"
-        : "current scene";
+        : "case focus";
 
-  if (!imageUrl && !currentLocation && chatMode.mode !== "interrogation") return null;
+  if (!imageUrl && chatMode.mode !== "interrogation" && focus?.mode !== "evidence") return null;
 
   return (
     <motion.div
@@ -169,7 +608,7 @@ function VisualStage({
             ? "这份材料已被归档，图像只呈现可观察细节。"
             : chatMode.mode === "interrogation"
               ? "当前画面锁定问询对象，口供和情绪变化会同步到右侧人物状态。"
-              : currentLocation?.description ?? "当前调查视野已同步。"}
+              : "当前调查焦点已同步。"}
         </p>
       </div>
     </motion.div>
@@ -343,20 +782,29 @@ export function LeftDrawer({
 
               {open === "evidence" && data && (
                 <div className="flex flex-col gap-1.5">
-                  {data.discoveredEvidence.length ? data.discoveredEvidence.map((evidence) => (
-                    <button
-                      key={evidence.id}
-                      className="flex w-full items-start gap-3 border border-paper/15 bg-paper/5 px-3 py-2.5 text-left transition hover:border-brass/35"
-                      onClick={() => setSelectedEvidence(evidence)}
-                      type="button"
-                    >
-                      <VisualThumb asset={findVisualAsset(data.visualManifest, { kind: "evidence", entityId: evidence.id })} />
-                      <span>
-                        <span className="font-mono text-[0.6rem] text-[#9d6d21]">{evidenceTypeLabels[evidence.type] ?? evidence.type}</span>
-                        <span className="mt-0.5 block line-clamp-1 text-sm font-semibold text-[#27241f]">{evidence.title}</span>
-                      </span>
-                    </button>
-                  )) : (
+                  {data.discoveredEvidence.length ? data.discoveredEvidence.map((evidence) => {
+                    const asset = findVisualAsset(data.visualManifest, { kind: "evidence", entityId: evidence.id });
+                    return (
+                      <button
+                        key={evidence.id}
+                        className={[
+                          "flex w-full items-start gap-3 border px-3 py-2.5 text-left transition",
+                          asset?.status === "pending"
+                            ? "border-[#b8d8d2] bg-[#eff8f5] hover:border-[#24615b]"
+                            : "border-paper/15 bg-paper/5 hover:border-brass/35",
+                        ].join(" ")}
+                        onClick={() => setSelectedEvidence(evidence)}
+                        type="button"
+                      >
+                        <VisualThumb asset={asset} />
+                        <span className="min-w-0">
+                          <span className="font-mono text-[0.6rem] text-[#9d6d21]">{evidenceTypeLabels[evidence.type] ?? evidence.type}</span>
+                          <span className="mt-0.5 block line-clamp-1 text-sm font-semibold text-[#27241f]">{evidence.title}</span>
+                          <VisualInlineStatus asset={asset} />
+                        </span>
+                      </button>
+                    );
+                  }) : (
                     <p className="py-2 text-xs text-[#776f61]">尚无已归档证据。</p>
                   )}
                 </div>
@@ -458,6 +906,12 @@ export function LeftDrawer({
 
       {/* Evidence detail modal */}
       {selectedEvidence && (
+        (() => {
+          const asset = findVisualAsset(data?.visualManifest, { kind: "evidence", entityId: selectedEvidence.id });
+          const { keyFinding, detailLines } = evidenceModalContent(selectedEvidence, asset);
+          const prompts = asset?.investigationPrompts.slice(0, 3) ?? [];
+
+          return (
         <motion.div
           className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur"
           initial={{ opacity: 0 }}
@@ -466,7 +920,7 @@ export function LeftDrawer({
         >
           <motion.div
             className={[
-              "relative w-full max-w-sm overflow-hidden border border-[#cfa65b] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]",
+              "td-scrollbar-hidden relative max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-lg border border-[#cfa65b] bg-[#fffdf7] p-0 shadow-[0_18px_60px_rgba(49,40,28,0.16)]",
               selectedEvidence.reliability === "low" ? "td-noise td-divergence" : selectedEvidence.reliability === "medium" ? "td-noise" : "",
             ].join(" ")}
             initial={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -474,38 +928,77 @@ export function LeftDrawer({
             onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
             <motion.span
-              className="td-stamp absolute right-5 top-10 rotate-[-8deg] text-[#9d6d21] opacity-80"
+              className="td-stamp pointer-events-none absolute right-5 top-12 rotate-[-8deg] text-[#9d6d21] opacity-70"
               initial={{ opacity: 0, scale: 1.45, rotate: -16 }}
-              animate={{ opacity: 0.8, scale: 1, rotate: -8 }}
+              animate={{ opacity: 0.7, scale: 1, rotate: -8 }}
               transition={{ delay: 0.12, duration: 0.28, ease: "easeOut" }}
             >
               archived
             </motion.span>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="font-mono text-[0.62rem] text-[#9d6d21]">{evidenceTypeLabels[selectedEvidence.type] ?? selectedEvidence.type}</span>
-              <button onClick={() => setSelectedEvidence(null)} type="button" className="text-[#8b8171] hover:text-[#9d6d21]"><X size={13} /></button>
-            </div>
-            <VisualThumb asset={findVisualAsset(data?.visualManifest, { kind: "evidence", entityId: selectedEvidence.id })} className="mb-4 h-44 w-full" />
-            <h3 className="text-base font-bold text-[#27241f]">{selectedEvidence.title}</h3>
-            <p className="mt-1 font-mono text-[0.6rem] text-[#8b8171]">来源：{selectedEvidence.source}</p>
-            {Object.entries(selectedEvidence.visibleData).length > 0 && (
-              <div className="mt-3 grid gap-1.5">
-                {Object.entries(selectedEvidence.visibleData).map(([k, v]) => (
-                  <div key={k} className="grid grid-cols-[6rem_1fr] gap-2 border-b border-[#e3dac8] pb-1.5">
-                    <span className="font-mono text-[0.6rem] text-[#8b8171]">{k}</span>
-                    <span className="text-xs text-[#3d352b]">{String(v)}</span>
-                  </div>
-                ))}
+            <div className="flex items-start justify-between gap-4 border-b border-[#e3dac8] bg-[#f8f3e8] px-5 py-4">
+              <div className="min-w-0">
+                <span className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-[#9d6d21]">{evidenceTypeLabels[selectedEvidence.type] ?? selectedEvidence.type}</span>
+                <h3 className="mt-2 pr-12 text-lg font-black leading-tight text-[#27241f]">{selectedEvidence.title}</h3>
+                <p className="mt-1 font-mono text-[0.6rem] text-[#8b8171]">来源：{selectedEvidence.source}</p>
               </div>
-            )}
-            <div className="mt-3 flex items-center gap-2">
-              <span className="font-mono text-[0.58rem] text-[#8b8171]">可靠性</span>
-              <span className={`font-mono text-[0.62rem] ${selectedEvidence.reliability === "high" ? "text-[#24615b]" : selectedEvidence.reliability === "medium" ? "text-[#9d6d21]" : "text-[#a64e3b]"}`}>
-                {selectedEvidence.reliability === "high" ? "高" : selectedEvidence.reliability === "medium" ? "中" : "低"}
-              </span>
+              <button
+                onClick={() => setSelectedEvidence(null)}
+                type="button"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#8b8171] hover:bg-[#fffdf7] hover:text-[#9d6d21]"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="p-5">
+              <VisualThumb asset={asset} className="mb-4 h-52 w-full rounded-md" />
+              <VisualInlineStatus asset={asset} />
+              {keyFinding && (
+                <div className="mt-3 border border-[#d8cfba] bg-[#f8f3e8] p-3">
+                  <p className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-[#9d6d21]">关键发现</p>
+                  <p className="mt-2 text-sm leading-6 text-[#3d352b]">{keyFinding}</p>
+                </div>
+              )}
+              {detailLines.length > 0 && (
+                <div className="mt-3 grid gap-1.5">
+                  {detailLines.map((detail) => (
+                    <p key={detail} className="border-l-2 border-[#cfa65b] pl-2 text-xs leading-5 text-[#564d42]">
+                      {detail}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {prompts.length ? (
+                <div className="mt-4 border-t border-[#e3dac8] pt-3">
+                  <p className="mb-2 font-mono text-[0.58rem] uppercase tracking-[0.14em] text-[#24615b]">继续追问</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {prompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        className="inline-flex items-center gap-1 rounded-sm border border-[#b8d8d2] bg-[#e8f6f2] px-2 py-1 font-mono text-[0.58rem] text-[#24615b] hover:border-[#24615b]"
+                        onClick={() => {
+                          setInput(prompt);
+                          setSelectedEvidence(null);
+                          setOpen(null);
+                        }}
+                        type="button"
+                      >
+                        <Search size={11} /> {shortText(prompt, 22)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <div className="mt-4 flex items-center gap-2 border-t border-[#e3dac8] pt-3">
+                <span className="font-mono text-[0.58rem] text-[#8b8171]">可靠性</span>
+                <span className={`font-mono text-[0.62rem] ${selectedEvidence.reliability === "high" ? "text-[#24615b]" : selectedEvidence.reliability === "medium" ? "text-[#9d6d21]" : "text-[#a64e3b]"}`}>
+                  {selectedEvidence.reliability === "high" ? "高" : selectedEvidence.reliability === "medium" ? "中" : "低"}
+                </span>
+              </div>
             </div>
           </motion.div>
         </motion.div>
+          );
+        })()
       )}
     </div>
   );
@@ -553,6 +1046,7 @@ export function CenterStage({
   const workspaceRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const [cmdExpanded, setCmdExpanded] = useState(false);
+  const [selectedAttachment, setSelectedAttachment] = useState<VisualAsset | null>(null);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationPulse = usePulseFlag(currentLocation?.id ?? "", 1100);
   const evidencePulse = usePulseFlag(evidenceCount, 1100);
@@ -598,6 +1092,16 @@ export function CenterStage({
             }}
             transition={{ duration: 0.3 }}
           />
+          {currentLocation && (
+            <div className="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
+              <div className="absolute left-[8%] top-[22%] max-w-5xl select-none font-display text-7xl font-black leading-none text-[#24615b]/[0.045] md:text-8xl lg:text-9xl">
+                {currentLocation.name}
+              </div>
+              <div className="absolute bottom-[18%] left-[18%] hidden font-mono text-[0.62rem] uppercase tracking-[0.42em] text-[#9d6d21]/25 md:block">
+                field note / active scene
+              </div>
+            </div>
+          )}
 
           <motion.div
             className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b px-5 shadow-[0_12px_36px_rgba(36,30,22,0.08)]"
@@ -687,10 +1191,12 @@ export function CenterStage({
                 manifest={visualManifest}
               />
               {chatMessages.length === 0 && (
-                <div className="rounded-lg border border-[#d8cfba] bg-white/82 p-5 shadow-[0_18px_60px_rgba(49,40,28,0.12)]">
-                  <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#24615b]">secured copilot workspace</p>
+                <div className="border border-l-4 border-[#d8cfba] border-l-[#24615b] bg-[#fffdf7]/72 p-5 shadow-[0_18px_60px_rgba(49,40,28,0.1)] backdrop-blur-sm">
+                  <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#24615b]">现场记录</p>
                   <p className="mt-3 text-sm leading-6 text-[#625a4d]">
-                    直接输入案件相关问题。无关办公问答会被拒绝；涉及剧透的问题会被引导回证据分析。左右两侧会在回答之后同步刷新证据、人物和时间线。
+                    我先把现场压一下：现在人在{currentLocation?.name ?? "案发现场"}。
+                    {currentLocation?.description ?? "门禁、监控、值班记录和现场物件会是第一批能撬开的口子。"}
+                    你可以直接问要查哪一项，也可以从左侧线索进去看。
                   </p>
                 </div>
               )}
@@ -705,29 +1211,36 @@ export function CenterStage({
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.16 }}
                   >
-                    <div
-                      className={[
-                        "max-w-[82%] rounded-lg border px-4 py-3 shadow-[0_14px_40px_rgba(49,40,28,0.12)]",
-                        isUser
-                          ? "border-[#cfa65b] bg-[#fff5db] text-[#2f2618]"
-                          : isSuspect
-                            ? "border-[#b86956] bg-[#fff0ea] text-[#35201a]"
-                            : "border-[#b8d8d2] bg-white/92 text-[#1f2927]",
-                      ].join(" ")}
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <span className={["font-mono text-[0.6rem] uppercase tracking-[0.16em]", isUser ? "text-[#9d6d21]" : isSuspect ? "text-[#a64e3b]" : "text-[#24615b]"].join(" ")}>
-                          {message.label ?? (isUser ? "你" : isSuspect ? "问询对象" : "案件 AI 助手")}
-                        </span>
-                        {message.pending && (
-                          <span className="flex items-center gap-1 text-[#8b8171]" aria-label="typing">
-                            <span className="td-typing-dot" />
-                            <span className="td-typing-dot" />
-                            <span className="td-typing-dot" />
+                    <div className={["flex max-w-[82%] flex-col gap-2", isUser ? "items-end" : "items-start"].join(" ")}>
+                      <div
+                        className={[
+                          "w-full border px-4 py-3 shadow-[0_14px_40px_rgba(49,40,28,0.1)] backdrop-blur-sm",
+                          isUser
+                            ? "rounded-lg border-[#cfa65b] bg-[#fff5db]/88 text-[#2f2618]"
+                            : isSuspect
+                              ? "rounded-lg border-[#b86956] bg-[#fff0ea]/88 text-[#35201a]"
+                              : "rounded-md border-[#b8d8d2] border-l-4 border-l-[#24615b] bg-[#fffdf7]/78 text-[#1f2927]",
+                        ].join(" ")}
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span className={["font-mono text-[0.6rem] uppercase tracking-[0.16em]", isUser ? "text-[#9d6d21]" : isSuspect ? "text-[#a64e3b]" : "text-[#24615b]"].join(" ")}>
+                            {message.label ?? (isUser ? "你" : isSuspect ? "问询对象" : "案件 AI 助手")}
                           </span>
-                        )}
+                          {message.pending && (
+                            <span className="flex items-center gap-1 text-[#8b8171]" aria-label="typing">
+                              <span className="td-typing-dot" />
+                              <span className="td-typing-dot" />
+                              <span className="td-typing-dot" />
+                            </span>
+                          )}
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm leading-6">{message.text || "..."}</p>
                       </div>
-                      <p className="whitespace-pre-wrap text-sm leading-6">{message.text || "..."}</p>
+                      {message.attachments?.length ? (
+                        <div className="w-full">
+                          <ChatVisualAttachmentGrid assets={message.attachments} onOpen={setSelectedAttachment} />
+                        </div>
+                      ) : null}
                     </div>
                   </motion.div>
                 );
@@ -765,6 +1278,16 @@ export function CenterStage({
               CASE CLOSED
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedAttachment && (
+          <VisualAttachmentModal
+            asset={selectedAttachment}
+            onClose={() => setSelectedAttachment(null)}
+            onPrompt={setInput}
+          />
         )}
       </AnimatePresence>
 

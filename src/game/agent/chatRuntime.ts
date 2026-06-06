@@ -26,10 +26,15 @@ const offTopicKeywords = [
 
 const spoilerPatterns = [
   "谁最可疑",
+  "谁是责任人",
+  "谁负责",
+  "谁干的",
   "谁是凶手",
   "真凶是谁",
   "直接告诉我答案",
   "告诉我真相",
+  "最终答案",
+  "最终责任人",
   "凶手",
 ];
 
@@ -82,7 +87,7 @@ export function routeChatCommand(
   }
 
   if (spoilerPatterns.some((keyword) => text.includes(normalize(keyword)))) {
-    return { kind: "spoiler_request", reason: "我不能直接替你定嫌疑人，但可以把当前人物按动机、机会和口供矛盾拆开比对。" };
+    return { kind: "spoiler_request", reason: "我不能直接替你定最终责任人，但可以把当前人物按动机、机会和口供矛盾拆开比对。" };
   }
 
   const suspect =

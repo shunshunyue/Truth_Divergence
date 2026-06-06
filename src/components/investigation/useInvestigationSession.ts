@@ -172,6 +172,7 @@ export function useInvestigationSession() {
   const [actionStatus, setActionStatus] = useState("等待调查指令。");
   const [chatMode, setChatMode] = useState<ChatModeState>({ mode: "assistant", label: "案件 AI 助手" });
   const [chatMessages, setChatMessages] = useState<InvestigationChatMessage[]>([]);
+  const [completedVisualAsset, setCompletedVisualAsset] = useState<VisualAsset | null>(null);
   const [visualFocus, setVisualFocus] = useState<VisualFocusState>(null);
 
   useEffect(() => {
@@ -283,6 +284,42 @@ export function useInvestigationSession() {
       );
     }
 
+    function attachVisualToChatMessage({
+      asset,
+      messageId,
+      turnId,
+    }: {
+      asset: VisualAsset;
+      messageId?: string;
+      turnId: string;
+    }) {
+      setChatMessages((current) => {
+        let targetId = messageId;
+        if (!targetId) {
+          for (let index = current.length - 1; index >= 0; index -= 1) {
+            const message = current[index];
+            if (!message) continue;
+            if (message.turnId === turnId && (message.speaker === "assistant" || message.speaker === "suspect")) {
+              targetId = message.id;
+              break;
+            }
+          }
+        }
+
+        if (!targetId) return current;
+
+        return current.map((message) => {
+          if (message.id !== targetId) return message;
+          const attachments = message.attachments ?? [];
+          if (attachments.some((item) => item.id === asset.id)) return message;
+          return {
+            ...message,
+            attachments: [...attachments, asset],
+          };
+        });
+      });
+    }
+
     function handleRuntimeEvent(envelope: AgentEventEnvelope) {
       if (seenEventIdsRef.current.has(envelope.id)) return;
       seenEventIdsRef.current.add(envelope.id);
@@ -385,6 +422,16 @@ export function useInvestigationSession() {
         }
       }
 
+      if (event === "chat.attachment.added") {
+        upsertVisualAsset(envelope.payload.asset);
+        attachVisualToChatMessage({
+          asset: envelope.payload.asset,
+          messageId: envelope.payload.messageId,
+          turnId: envelope.payload.turnId,
+        });
+        setActionStatus(`已调出影像：${envelope.payload.asset.title}`);
+      }
+
       if (event === "session.ready") {
         playCachedBootSequence(envelope.payload);
       }
@@ -422,8 +469,18 @@ export function useInvestigationSession() {
         mergeVisualManifest(() => envelope.payload.manifest);
       }
 
-      if (event === "visual.asset.pending" || event === "visual.asset.ready") {
+      if (event === "visual.asset.pending") {
         upsertVisualAsset(envelope.payload.asset);
+        setActionStatus(`影像整理中：${envelope.payload.asset.title}`);
+      }
+
+      if (event === "visual.asset.ready") {
+        upsertVisualAsset(envelope.payload.asset);
+        const asset = envelope.payload.asset;
+        if (asset.tags.includes("runtime-demand") && (asset.fileUrl || asset.thumbUrl)) {
+          setCompletedVisualAsset(asset);
+          setActionStatus(`新影像已归档：${asset.title}`);
+        }
       }
 
       if (event === "visual.focus.changed") {
@@ -570,6 +627,8 @@ export function useInvestigationSession() {
     showBriefing,
     chatMessages,
     chatMode,
+    completedVisualAsset,
+    dismissVisualNotice: () => setCompletedVisualAsset(null),
     visualFocus,
     submitCommand,
   };

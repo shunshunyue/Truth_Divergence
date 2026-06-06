@@ -1,7 +1,11 @@
 import { randomUUID } from "crypto";
 import { claimRandomReadyCase } from "@/game/cache/caseCache";
 import { ensureCaseCacheWorkerStarted } from "@/game/cache/caseCacheWorker";
-import { generateEvidenceVisualAsset, shouldGenerateEvidenceVisualAssets } from "@/ai/imageGenerator";
+import {
+  createPendingEvidenceVisualAsset,
+  generateEvidenceVisualAsset,
+  shouldGenerateRuntimeVisualAssets,
+} from "@/ai/imageGenerator";
 import { applyAction } from "@/game/engine/applyAction";
 import {
   appendSessionChatMessage,
@@ -68,6 +72,7 @@ type FinalizeActionOptions = {
   caseData: CaseData;
   discovery?: RuntimeDiscovery;
   finalState: PlayerCaseState;
+  input: string;
   result: ActionResult;
   resultText: string;
   sessionId: string;
@@ -82,9 +87,132 @@ function sessionPayload(
     sessionId: session.sessionId,
     caseData,
     state: buildPublicState(session.state),
-    ...(session.visualManifest ? { visualManifest: session.visualManifest } : {}),
+    ...(session.visualManifest ? { visualManifest: publicVisualManifest(session.visualManifest) } : {}),
     ...(resultText ? { resultText } : {}),
   };
+}
+
+function publicVisualAsset(asset: VisualAsset): VisualAsset {
+  return {
+    ...asset,
+    prompt: "",
+  };
+}
+
+function isPublicVisualAsset(asset: VisualAsset) {
+  return asset.visibility === "opening" || Boolean(asset.revealedAt);
+}
+
+function publicVisualManifest(manifest: CaseVisualManifest): CaseVisualManifest {
+  return {
+    ...manifest,
+    assets: manifest.assets.filter(isPublicVisualAsset).map(publicVisualAsset),
+  };
+}
+
+function normalizeMatchText(value: string | undefined) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+function compactMatchValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(compactMatchValue).filter(Boolean).join("\n");
+  if (typeof value === "object") return Object.values(value as Record<string, unknown>).map(compactMatchValue).filter(Boolean).join("\n");
+  return String(value);
+}
+
+const genericVisualTriggerWords = new Set([
+  "查",
+  "调查",
+  "看看",
+  "看一下",
+  "证据",
+  "线索",
+  "物件",
+  "现场",
+  "地点",
+  "记录",
+  "照片",
+  "图",
+  "影像",
+  "头像",
+]);
+
+const runtimeVisualDemandWords = [
+  "看",
+  "看看",
+  "看一下",
+  "调出",
+  "展示",
+  "放大",
+  "图片",
+  "图像",
+  "照片",
+  "影像",
+  "画面",
+  "截图",
+  "特写",
+];
+
+function visualAssetMatchesText(asset: VisualAsset, input: string, reply: string) {
+  const haystack = normalizeMatchText(`${input}\n${reply}`);
+  const strongNeedles = [
+    asset.title,
+    asset.description,
+    asset.caption,
+    asset.entityId,
+    ...asset.tags,
+    ...asset.revealHints.filter((hint) => !genericVisualTriggerWords.has(hint)),
+  ]
+    .map(normalizeMatchText)
+    .filter((item) => item.length >= 2);
+
+  if (strongNeedles.some((needle) => haystack.includes(needle) || needle.includes(haystack))) {
+    return true;
+  }
+
+  const weakHits = asset.revealHints
+    .map(normalizeMatchText)
+    .filter((hint) => genericVisualTriggerWords.has(hint) && haystack.includes(hint));
+
+  return weakHits.length >= 2;
+}
+
+function textSuggestsRuntimeVisual(input: string) {
+  const normalized = normalizeMatchText(input);
+  return runtimeVisualDemandWords.some((word) => normalized.includes(word));
+}
+
+function evidenceMatchesText(evidence: CaseData["evidence"][number], input: string, reply: string) {
+  const haystack = normalizeMatchText(`${input}\n${reply}`);
+  const needles = [
+    evidence.id,
+    evidence.title,
+    evidence.type,
+    evidence.source,
+    evidence.visualTemplate,
+    compactMatchValue(evidence.visibleData),
+  ]
+    .map(normalizeMatchText)
+    .filter((item) => item.length >= 2);
+  return needles.some((needle) => haystack.includes(needle) || needle.includes(haystack));
+}
+
+function visualAssetHasAvailableContext(asset: VisualAsset, state: PlayerCaseState) {
+  if (asset.relatedEvidenceIds.length && asset.relatedEvidenceIds.some((id) => state.discoveredEvidence.includes(id))) {
+    return true;
+  }
+  if (asset.relatedLocationIds.length && asset.relatedLocationIds.some((id) => state.unlockedLocations.includes(id) || state.currentLocation === id)) {
+    return true;
+  }
+  if (asset.relatedSuspectIds.length && asset.relatedSuspectIds.some((id) => state.visibleSuspects.includes(id) || state.interviewedSuspects.includes(id))) {
+    return true;
+  }
+  return !asset.relatedEvidenceIds.length && !asset.relatedLocationIds.length && !asset.relatedSuspectIds.length;
 }
 
 function buildStatePatch(previous: PlayerCaseState, next: PlayerCaseState): AgentPlayerStatePatch {
@@ -298,11 +426,12 @@ export class RoomAgentRuntime {
 
       this.scheduleOpeningMetadata(session);
       if (session.visualManifest) {
-        this.enqueueVisualManifest(session.sessionId, session.visualManifest);
+        this.enqueueVisualManifest(session);
         const coverAsset = this.visualAssetFor(session.visualManifest, {
           entityId: session.caseData.id,
           kind: "case_cover",
         });
+        if (coverAsset) this.enqueueVisualAssetReady(session.sessionId, coverAsset);
         this.enqueueVisualFocus(session, {
           mode: "case",
           entityId: session.caseData.id,
@@ -464,6 +593,7 @@ export class RoomAgentRuntime {
           caseData: finalCaseData,
           discovery,
           finalState,
+          input: trimmed,
           result,
           resultText: finalResultText,
           sessionId,
@@ -471,6 +601,12 @@ export class RoomAgentRuntime {
         this.enqueueVisualFocus(finalSession, {
           ...visualFocusDecision,
           asset: this.assetForVisualDecision(finalSession, visualFocusDecision),
+        });
+        const visualSession = this.revealTriggeredVisualAssets({
+          input: trimmed,
+          reply: finalResultText,
+          session: finalSession,
+          turnId,
         });
         this.enqueue(
           {
@@ -498,10 +634,10 @@ export class RoomAgentRuntime {
           state: finalState,
           fallbackDiscovery: discovery,
         });
-        this.scheduleIdleHint(finalSession);
+        this.scheduleIdleHint(visualSession);
         return;
       } else {
-        await this.streamAiOrFallbackChatMessage({
+        replyText = await this.streamAiOrFallbackChatMessage({
           sessionId,
           turnId,
           speaker,
@@ -525,6 +661,7 @@ export class RoomAgentRuntime {
         caseData: finalCaseData,
         discovery,
         finalState,
+        input: trimmed,
         result,
         resultText: finalResultText,
         sessionId,
@@ -532,6 +669,12 @@ export class RoomAgentRuntime {
       this.enqueueVisualFocus(finalSession, {
         ...visualFocusDecision,
         asset: this.assetForVisualDecision(finalSession, visualFocusDecision),
+      });
+      const visualSession = this.revealTriggeredVisualAssets({
+        input: trimmed,
+        reply: finalResultText,
+        session: finalSession,
+        turnId,
       });
       this.enqueue(
         {
@@ -545,7 +688,7 @@ export class RoomAgentRuntime {
         { priority: "normal", sessionId, scope: "action.finished" },
       );
       this.finishTurn(sessionId, turnId);
-      this.scheduleIdleHint(finalSession);
+      this.scheduleIdleHint(visualSession);
     } catch (error) {
       this.enqueueError(error instanceof Error ? error.message : "RoomAgent 行动处理失败。", sessionId);
     } finally {
@@ -587,6 +730,7 @@ export class RoomAgentRuntime {
     caseData,
     discovery,
     finalState,
+    input,
     result,
     resultText,
     sessionId,
@@ -644,7 +788,13 @@ export class RoomAgentRuntime {
       state: finalState,
     });
     const finalSession = updated ?? { ...baseSession, caseData, state: finalState };
-    const visualEvidence = discovery?.addedEvidence ?? result.unlockedEvidence;
+    const visualEvidence = this.selectRuntimeEvidenceVisuals({
+      discovery,
+      input,
+      reply: resultText,
+      result,
+      session: finalSession,
+    });
     if (visualEvidence.length) {
       this.generateEvidenceVisualsInBackground(finalSession, visualEvidence);
     }
@@ -792,8 +942,38 @@ export class RoomAgentRuntime {
     })();
   }
 
+  private selectRuntimeEvidenceVisuals({
+    discovery,
+    input,
+    reply,
+    result,
+    session,
+  }: {
+    discovery?: RuntimeDiscovery;
+    input: string;
+    reply: string;
+    result: ActionResult;
+    session: GameSession;
+  }) {
+    if (!shouldGenerateRuntimeVisualAssets()) return [];
+
+    const selected = new Map<string, CaseData["evidence"][number]>();
+    for (const evidence of discovery?.addedEvidence ?? result.unlockedEvidence) {
+      selected.set(evidence.id, evidence);
+    }
+
+    if (textSuggestsRuntimeVisual(input)) {
+      for (const evidence of buildVisibleEvidence(session.caseData, session.state)) {
+        if (evidenceMatchesText(evidence, input, reply)) selected.set(evidence.id, evidence);
+      }
+    }
+
+    const limit = Math.max(1, Number(process.env.CASE_VISUALS_RUNTIME_LIMIT ?? 2));
+    return Array.from(selected.values()).slice(0, limit);
+  }
+
   private generateEvidenceVisualsInBackground(session: GameSession, evidenceItems: CaseData["evidence"]) {
-    if (!shouldGenerateEvidenceVisualAssets()) return;
+    if (!shouldGenerateRuntimeVisualAssets()) return;
     if (!session.visualManifest?.cacheId || !evidenceItems.length) return;
     const cacheId = session.visualManifest.cacheId;
 
@@ -806,22 +986,45 @@ export class RoomAgentRuntime {
             continue;
           }
 
-          this.enqueueStatus(`正在整理「${evidence.title}」的证据影像...`, "background", session.sessionId);
-          const asset = await generateEvidenceVisualAsset({ cacheId, evidence, manifest });
-          const updatedManifest: CaseVisualManifest = {
+          const pendingAsset = createPendingEvidenceVisualAsset({ cacheId, evidence, manifest });
+          const pendingManifest: CaseVisualManifest = {
             ...manifest,
-            assets: [...manifest.assets.filter((item) => item.id !== asset.id), asset],
+            assets: [...manifest.assets.filter((item) => item.id !== pendingAsset.id), pendingAsset],
+            updatedAt: pendingAsset.updatedAt,
+          };
+          updateSession(session.sessionId, { visualManifest: pendingManifest });
+          this.enqueueVisualAssetPending(session.sessionId, pendingAsset);
+          this.enqueueStatus(`正在整理「${evidence.title}」的证据影像...`, "background", session.sessionId);
+
+          const asset = await generateEvidenceVisualAsset({ cacheId, evidence, manifest: pendingManifest });
+          const latestAfterGeneration = getSession(session.sessionId) ?? {
+            ...latest,
+            visualManifest: pendingManifest,
+          };
+          const activeManifest = latestAfterGeneration.visualManifest ?? pendingManifest;
+          const existingAsset = activeManifest.assets.find((item) => item.id === pendingAsset.id);
+          const revealedAt = existingAsset?.revealedAt ?? new Date().toISOString();
+          const readyAsset: VisualAsset = {
+            ...asset,
+            createdAt: existingAsset?.createdAt ?? asset.createdAt,
+            revealedAt,
+            tags: Array.from(new Set([...asset.tags, "runtime-demand"])),
+            updatedAt: new Date().toISOString(),
+          };
+          const updatedManifest: CaseVisualManifest = {
+            ...activeManifest,
+            assets: [...activeManifest.assets.filter((item) => item.id !== readyAsset.id), readyAsset],
             updatedAt: new Date().toISOString(),
           };
           const updatedSession = updateSession(session.sessionId, { visualManifest: updatedManifest }) ?? {
-            ...latest,
+            ...latestAfterGeneration,
             visualManifest: updatedManifest,
           };
-          this.enqueueVisualAssetReady(session.sessionId, asset);
+          this.enqueueVisualAssetReady(session.sessionId, readyAsset);
           this.enqueueVisualFocus(updatedSession, {
             mode: "evidence",
             entityId: evidence.id,
-            asset,
+            asset: readyAsset,
             reason: "evidence_unlocked",
             intensity: "pulse",
           });
@@ -953,6 +1156,7 @@ export class RoomAgentRuntime {
 
   private canRevealVisual(session: GameSession, asset: VisualAsset | undefined) {
     if (!asset) return false;
+    if (asset.revealedAt) return true;
     if (asset.visibility === "opening") return true;
     if (asset.visibility === "location_visible") {
       return !asset.entityId || session.state.unlockedLocations.includes(asset.entityId) || asset.revealConditions.some((id) => session.state.unlockedLocations.includes(id));
@@ -972,14 +1176,26 @@ export class RoomAgentRuntime {
     return false;
   }
 
-  private enqueueVisualManifest(sessionId: string, manifest: CaseVisualManifest) {
+  private enqueueVisualManifest(session: GameSession) {
+    if (!session.visualManifest) return;
     this.enqueue(
       {
         event: "visual.manifest.ready",
         channel: "metadata",
-        payload: { sessionId, manifest },
+        payload: { sessionId: session.sessionId, manifest: publicVisualManifest(session.visualManifest) },
       },
-      { priority: "normal", sessionId, scope: "visual.manifest" },
+      { priority: "normal", sessionId: session.sessionId, scope: "visual.manifest" },
+    );
+  }
+
+  private enqueueVisualAssetPending(sessionId: string, asset: VisualAsset) {
+    this.enqueue(
+      {
+        event: "visual.asset.pending",
+        channel: "metadata",
+        payload: { sessionId, asset: publicVisualAsset(asset) },
+      },
+      { priority: "normal", sessionId, scope: "visual.asset" },
     );
   }
 
@@ -988,10 +1204,78 @@ export class RoomAgentRuntime {
       {
         event: "visual.asset.ready",
         channel: "metadata",
-        payload: { sessionId, asset },
+        payload: { sessionId, asset: publicVisualAsset(asset) },
       },
       { priority: "normal", sessionId, scope: "visual.asset" },
     );
+  }
+
+  private enqueueChatVisualAttachment(session: GameSession, turnId: string, asset: VisualAsset) {
+    this.enqueue(
+      {
+        event: "chat.attachment.added",
+        channel: "agent",
+        payload: {
+          sessionId: session.sessionId,
+          turnId,
+          asset: publicVisualAsset(asset),
+        },
+      },
+      { priority: "normal", sessionId: session.sessionId, scope: "chat.attachment" },
+    );
+  }
+
+  private revealTriggeredVisualAssets({
+    input,
+    reply,
+    session,
+    turnId,
+  }: {
+    input: string;
+    reply: string;
+    session: GameSession;
+    turnId: string;
+  }) {
+    const manifest = session.visualManifest;
+    if (!manifest) return session;
+
+    const candidates = manifest.assets
+      .filter((asset) => {
+        if (asset.visibility === "opening" || asset.revealedAt) return false;
+        if (asset.status !== "ready" && asset.source !== "fallback") return false;
+        if (!asset.fileUrl && !asset.thumbUrl) return false;
+        if (!visualAssetHasAvailableContext(asset, session.state)) return false;
+        return visualAssetMatchesText(asset, input, reply);
+      })
+      .slice(0, 2);
+
+    if (!candidates.length) return session;
+
+    const revealedAt = new Date().toISOString();
+    const revealedIds = new Set(candidates.map((asset) => asset.id));
+    const updatedManifest: CaseVisualManifest = {
+      ...manifest,
+      assets: manifest.assets.map((asset) => (revealedIds.has(asset.id) ? { ...asset, revealedAt, updatedAt: revealedAt } : asset)),
+      updatedAt: revealedAt,
+    };
+    const updatedSession = updateSession(session.sessionId, { visualManifest: updatedManifest }) ?? {
+      ...session,
+      visualManifest: updatedManifest,
+    };
+
+    for (const asset of updatedManifest.assets.filter((item) => revealedIds.has(item.id))) {
+      this.enqueueVisualAssetReady(session.sessionId, asset);
+      this.enqueueChatVisualAttachment(updatedSession, turnId, asset);
+      this.enqueueVisualFocus(updatedSession, {
+        mode: asset.kind === "evidence" || asset.kind === "clue_object" ? "evidence" : asset.kind === "location" ? "scene" : "case",
+        entityId: asset.entityId,
+        asset,
+        reason: "assistant_reference",
+        intensity: "spotlight",
+      });
+    }
+
+    return updatedSession;
   }
 
   private enqueueVisualFocus(
@@ -1264,6 +1548,8 @@ export class RoomAgentRuntime {
         text: finalText,
       });
     }
+
+    return finalText;
   }
 
   private async streamRuntimeDiscoveryChatMessage({

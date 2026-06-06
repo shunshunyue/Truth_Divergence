@@ -8,6 +8,7 @@ import {
   RelationshipModal,
   RightRail,
   TimelineModal,
+  VisualReadyModal,
 } from "@/components/investigation/InvestigationShell";
 import { useInvestigationSession } from "@/components/investigation/useInvestigationSession";
 
@@ -87,6 +88,13 @@ export function InvestigationClient() {
       )}
       {timelineOpen && state && investigation.data && (
         <TimelineModal data={investigation.data} state={state} onClose={() => setTimelineOpen(false)} />
+      )}
+      {investigation.completedVisualAsset && (
+        <VisualReadyModal
+          asset={investigation.completedVisualAsset}
+          onClose={investigation.dismissVisualNotice}
+          onPrompt={setInput}
+        />
       )}
     </main>
   );

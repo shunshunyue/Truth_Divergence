@@ -102,6 +102,16 @@ export type AgentRuntimeEvent =
       payload: ChatMessagePayload & { text: string };
     }
   | {
+      event: "chat.attachment.added";
+      channel: "agent";
+      payload: {
+        sessionId: string;
+        turnId: string;
+        messageId?: string;
+        asset: VisualAsset;
+      };
+    }
+  | {
       event: "session.ready";
       channel: "game";
       payload: AgentSessionPayload;

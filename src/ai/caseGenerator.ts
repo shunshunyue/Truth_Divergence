@@ -23,7 +23,7 @@ function schemaContract() {
     "theme": "中文主题",
     "difficulty": "中文难度",
     "openingEvent": {"headline":"中文","brief":"中文","initialPrompt":"中文"},
-    "victim": {"id":"victim-xxx","name":"中文","role":"死者","description":"中文"},
+    "victim": {"id":"victim-xxx","name":"中文","role":"受影响当事人/关键当事人","description":"中文"},
     "suspects": [
       {
         "id":"suspect-xxx","name":"中文","age":30,"identity":"中文",
@@ -76,7 +76,7 @@ function schemaContract() {
       }
     ],
     "truth": {
-      "killer":"suspect-xxx","motive":"中文","method":"中文","deathTime":"中文",
+      "killer":"suspect-xxx","motive":"中文","method":"中文","deathTime":"中文关键时间点",
       "keyTimeline":["timeline-xxx"],"keyEvidence":["evidence-xxx"],
       "falseLeads":["relationship-xxx"],"hiddenRelationships":["relationship-xxx"],
       "exclusionReasons":{"suspect-xxx":"中文"}
@@ -87,12 +87,15 @@ function schemaContract() {
 }
 
 function generationPrompt() {
-  return `生成一局全新的中文推理游戏案件种子。不要使用预设案件，不要复用示例内容，不要 markdown。
+  return `生成一局全新的中文推理游戏“可调查事件”种子。不要使用预设案件，不要复用示例内容，不要 markdown。
 
 硬性要求：
 - 所有案件内容都由你原创生成。
 - 只返回 JSON 对象。
+- 不要把事件默认写成凶杀案、命案、尸体现场或死者调查。题材可以是事故、失踪、调包、泄密、诈骗、舞弊、破坏、诬陷、医疗/校园/社区/公司纠纷、公共设施异常、财务黑洞等；核心是“事情合理、有证据、有矛盾、有责任链”。
+- 可以有受伤、死亡或犯罪，但只能在题材自然需要时出现，不能作为固定模板；不要血腥猎奇。
 - 必须完全符合下面的字段契约，不能增加 age 到 victim，不能把 victim 写成 suspect 格式，不能漏 role/description。
+- 兼容字段语义说明：victim 表示受影响当事人或关键利益方，不一定是死者；killer 表示主要责任人/关键隐瞒者，不一定杀人；isKiller=true 表示该人物是最终责任核心；method 表示事件形成机制/操作手法；deathTime 表示关键发生时间点。
 - 证据 type 只能是 CCTV、CALL_LOG、ACCESS_LOG、DIARY、RECEIPT、WITNESS、FORENSIC、CHAT、LOCATION、FINANCIAL、OBJECT、MAP。
 - reliability 只能是 low、medium、high。
 - relationship.type 只能是 normal、conflict、hidden、time、evidence、misleading。
@@ -104,11 +107,11 @@ function generationPrompt() {
   - evidence 必须返回空数组 []。
   - timeline 必须返回空数组 []。
   - relationships 必须返回空数组 []。
-  - locations 只返回 1 个开局地点，objects 生成 3-5 个可探索入口，比如“门岗记录终端”“发电机本体”“湿痕账册”“监控控制台”。这些 object 的 unlocksEvidence/unlocksSuspects/unlocksLocations 全部用 []，运行时再动态追加。
-  - suspects 生成 3-5 个完整隐藏人物种子，其中必须有且只有 1 个 isKiller=true。
+  - locations 只返回 1 个开局地点，objects 生成 3-5 个可探索入口，比如“门岗记录终端”“设备日志”“合同附件”“异常账页”“监控控制台”“样本柜”。这些 object 的 unlocksEvidence/unlocksSuspects/unlocksLocations 全部用 []，运行时再动态追加。
+  - suspects 生成 3-5 个完整隐藏人物种子，其中必须有且只有 1 个 isKiller=true，含义是“最终责任核心/关键隐瞒者”。
   - witnesses 可生成 1-3 个简短人物种子。
-  - truth 里必须指定 killer、motive、method、deathTime；keyEvidence/keyTimeline 可先返回 []，运行时动态补。
-  - openingEvent.initialPrompt 要鼓励玩家直接问“查进出记录 / 查监控 / 问某人 / 翻账册”，不要写成建议列表。
+  - truth 里必须指定 killer、motive、method、deathTime；keyEvidence/keyTimeline 可先返回 []，运行时动态补。truth 必须能被证据链合理推出，不能靠巧合或超自然解释。
+  - openingEvent.initialPrompt 要鼓励玩家直接问“查进出记录 / 查监控 / 问某人 / 核对账册或设备记录”，不要写成建议列表。
   - 不要生成页面、HTML 或 aiPage；案件进入游戏后由 WebSocket 对话和左右侧元数据面板呈现。
 
 ${schemaContract()}`;
@@ -146,7 +149,7 @@ export async function generateInitialSession(
     messages: [
       {
         role: "system",
-        content: "你是《真相偏差》的 AI 案件生成器。案件内容必须全部原创，且必须输出严格 JSON。",
+        content: "你是《今天事真多》的 AI 案件生成器。案件内容必须全部原创，且必须输出严格 JSON。",
       },
       {
         role: "user",

@@ -1,50 +1,109 @@
+import { existsSync, readdirSync } from "node:fs";
+import path from "node:path";
 import Link from "next/link";
-import { ArrowRight, ScanLine } from "lucide-react";
+import { ArrowRight, FileSearch, Fingerprint, ScanLine, Sparkles } from "lucide-react";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const caseSignals = [
+  { label: "门禁", value: "01:36 补录" },
+  { label: "监控", value: "七分钟黑屏" },
+  { label: "账册", value: "水渍封页" },
+];
+
+function getRandomCaseCover() {
+  const casesRoot = path.join(process.cwd(), "public", "generated", "cases");
+  const fallbackCover = "/generated/workspace-preview.png";
+
+  if (!existsSync(casesRoot)) {
+    return fallbackCover;
+  }
+
+  const covers = readdirSync(casesRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const coverDir = path.join(casesRoot, entry.name, "case_cover");
+
+      if (!existsSync(coverDir)) {
+        return [];
+      }
+
+      return readdirSync(coverDir, { withFileTypes: true })
+        .filter((file) => file.isFile() && /^session-case\.(png|jpe?g|webp|svg)$/i.test(file.name))
+        .map((file) => `/generated/cases/${entry.name}/case_cover/${file.name}`);
+    });
+
+  return covers.length > 0 ? covers[Math.floor(Math.random() * covers.length)] : fallbackCover;
+}
 
 export default function Home() {
-  return (
-    <main className="min-h-screen overflow-hidden bg-void text-[#ece7dc]">
-      <section className="grid min-h-screen grid-cols-1 lg:grid-cols-[minmax(0,1fr)_30rem]">
-        <div className="flex flex-col justify-center border-brass/20 px-6 py-10 md:px-12 lg:border-r">
-          <p className="font-mono text-xs text-brass">偏差调查局 / 案件接入</p>
-          <h1 className="mt-5 font-display text-6xl font-black leading-[0.92] text-[#fff8df] md:text-8xl">
-            真相偏差
-          </h1>
-          <p className="mt-7 max-w-2xl text-lg leading-8 text-[#c9c0ad]">
-            进入后，AI 会生成本局案件的背景、事件和第一批可疑线索。你不选择案件，只负责调查。
-          </p>
+  const coverSrc = getRandomCaseCover();
 
-          <Link
-            className="mt-10 inline-flex min-h-12 w-fit items-center gap-3 border border-brass/60 bg-brass px-5 font-mono text-xs font-bold text-black transition hover:bg-signal"
-            href="/play"
-          >
-            开始调查
-            <ArrowRight size={16} />
-          </Link>
+  return (
+    <main className="relative min-h-screen overflow-hidden bg-[#ebe4d6] text-[#27241f]">
+      <img
+        alt="随机案件现场"
+        className="absolute inset-0 h-full w-full object-cover object-[64%_center]"
+        src={coverSrc}
+      />
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(244,239,229,0.98)_0%,rgba(244,239,229,0.9)_35%,rgba(244,239,229,0.44)_62%,rgba(39,36,31,0.26)_100%),linear-gradient(180deg,rgba(244,239,229,0.18)_0%,rgba(244,239,229,0.08)_44%,rgba(39,36,31,0.66)_100%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(47,42,34,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(47,42,34,0.045)_1px,transparent_1px)] bg-[length:36px_36px]" />
+      <div className="pointer-events-none absolute bottom-0 left-0 h-40 w-full bg-[linear-gradient(0deg,rgba(39,36,31,0.5),transparent)]" />
+
+      <section className="relative z-10 mx-auto flex min-h-screen max-w-[1680px] flex-col px-5 py-5 sm:px-8 lg:px-10 lg:py-8">
+        <header className="td-home-rise flex items-start justify-between gap-4">
+          <div className="inline-flex items-center gap-2 border border-[#cdbf9e] bg-[#fffdf7]/78 px-3 py-2 text-xs font-bold text-[#24615b] shadow-[0_14px_40px_rgba(49,40,28,0.12)] backdrop-blur-sm">
+            <Sparkles size={14} />
+            AI 案件值班中
+          </div>
+
+          <div className="hidden items-center gap-3 border border-[#fffdf7]/64 bg-[#27241f]/28 px-3 py-2 text-[#fffdf7] shadow-[0_16px_46px_rgba(39,36,31,0.18)] backdrop-blur-md md:flex">
+            <FileSearch size={14} />
+            <span className="font-mono text-[0.65rem] font-bold uppercase">sample case</span>
+          </div>
+        </header>
+
+        <div className="td-home-rise td-home-rise-delay flex flex-1 items-center py-12 sm:py-16 lg:py-8">
+          <div className="max-w-[58rem]">
+            <p className="font-mono text-xs font-bold uppercase text-[#9d6d21]">
+              雾港冻库停电案
+            </p>
+            <h1 className="mt-4 max-w-[54rem] font-display text-7xl font-black leading-[0.86] text-[#27241f] md:text-8xl xl:text-[9rem]">
+              今天事真多
+            </h1>
+            <p className="mt-6 max-w-3xl text-2xl font-black leading-tight text-[#27241f] md:text-4xl">
+              十分钟黑暗里，谁补了一条门禁？
+            </p>
+            <p className="mt-5 max-w-xl text-base font-semibold leading-7 text-[#4f483d] md:text-lg">
+              你开口追问，AI 把口供、证据和矛盾推到台前。
+            </p>
+          </div>
         </div>
 
-        <aside className="relative min-h-[24rem] border-t border-brass/20 bg-panel/50 p-6 lg:border-t-0">
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(111,213,199,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(111,213,199,0.05)_1px,transparent_1px)] bg-[length:28px_28px]" />
-          <div className="relative grid h-full content-center">
-            <div className="border border-scan/20 bg-black/40 p-5 shadow-terminal">
-              <div className="mb-5 flex items-center justify-between font-mono text-xs text-scan">
-                <span>等待案件生成</span>
-                <ScanLine size={16} />
+        <div className="td-home-rise td-home-rise-final grid gap-4 pb-2 lg:grid-cols-[auto_minmax(20rem,1fr)] lg:items-end">
+          <Link
+            className="group inline-flex min-h-14 w-fit items-center gap-3 border border-[#143b37] bg-[#163c3a] px-6 font-mono text-xs font-bold text-[#eafffb] shadow-[0_18px_44px_rgba(22,60,58,0.25)] transition hover:bg-[#24615b]"
+            href="/play"
+          >
+            开始处理今天的事
+            <ArrowRight className="transition group-hover:translate-x-1" size={17} />
+          </Link>
+
+          <div className="flex flex-wrap items-center gap-2 text-[#fffdf7] lg:justify-end">
+            {caseSignals.map((item, index) => (
+              <div
+                key={item.label}
+                className="td-home-signal flex min-h-12 items-center gap-2 border border-[#fffdf7]/58 bg-[#27241f]/34 px-3 shadow-[0_12px_34px_rgba(39,36,31,0.18)] backdrop-blur-md"
+                style={{ animationDelay: `${360 + index * 90}ms` }}
+              >
+                {index === 0 ? <Fingerprint size={14} /> : <ScanLine size={14} />}
+                <span className="font-mono text-[0.62rem] text-[#fffdf7]/62">{item.label}</span>
+                <span className="text-xs font-bold text-[#fffdf7]">{item.value}</span>
               </div>
-              <div className="grid gap-3">
-                <div className="h-3 w-2/3 bg-scan/25" />
-                <div className="h-3 w-5/6 bg-brass/25" />
-                <div className="h-3 w-1/2 bg-rust/25" />
-                <div className="mt-6 border border-white/10 bg-void/80 p-4">
-                  <p className="font-mono text-xs text-[#8f8574]">CASE SEED</p>
-                  <p className="mt-2 text-sm leading-6 text-[#d8d0bd]">
-                    案件不是预置列表，而是在开局时由 AI 与规则层共同生成。
-                  </p>
-                </div>
-              </div>
-            </div>
+            ))}
           </div>
-        </aside>
+        </div>
       </section>
     </main>
   );

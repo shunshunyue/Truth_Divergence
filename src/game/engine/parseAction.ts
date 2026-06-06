@@ -12,7 +12,7 @@ const intentKeywords: Array<[ParsedAction["intent"], string[]]> = [
   ["BUILD_TIMELINE", ["timeline", "时间线", "轨迹"]],
   ["BUILD_RELATIONSHIP", ["relationship", "关系图", "关系线", "关系网", "人物关系", "整理关系", "梳理关系"]],
   ["ASK_ASSISTANT", ["assistant", "hint", "help", "助手", "提示", "帮我"]],
-  ["SUBMIT_DEDUCTION", ["submit", "deduction", "truth", "提交", "推理", "真凶"]],
+  ["SUBMIT_DEDUCTION", ["submit", "deduction", "truth", "提交", "推理", "真相", "责任人", "真凶"]],
 ];
 
 function normalize(input: string) {

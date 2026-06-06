@@ -116,6 +116,107 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
+function compactRuntimeValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(compactRuntimeValue).filter(Boolean).join("；");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, nestedValue]) => {
+        const nestedText = compactRuntimeValue(nestedValue);
+        return nestedText ? `${key}：${nestedText}` : "";
+      })
+      .filter(Boolean)
+      .join("；");
+  }
+  return String(value);
+}
+
+function visualTemplateForEvidenceType(type: Evidence["type"]) {
+  const templates: Record<Evidence["type"], string> = {
+    CCTV: "cctv_frame",
+    ACCESS_LOG: "access_log",
+    FINANCIAL: "ledger_page",
+    RECEIPT: "document",
+    CALL_LOG: "call_log",
+    CHAT: "chat_screen",
+    LOCATION: "map_trace",
+    FORENSIC: "forensic_report",
+    OBJECT: "object_photo",
+    MAP: "map_trace",
+    DIARY: "document",
+    WITNESS: "statement_file",
+  };
+  return templates[type] ?? "document";
+}
+
+function visualCarrierForEvidenceType(type: Evidence["type"]) {
+  const carriers: Record<Evidence["type"], string> = {
+    CCTV: "监控画面或监控控制台屏幕",
+    ACCESS_LOG: "门禁终端、门岗登记屏或刷卡记录表",
+    FINANCIAL: "账册、结算表或费用核对单",
+    RECEIPT: "收据、小票或付款凭证",
+    CALL_LOG: "通话记录屏幕或通讯清单",
+    CHAT: "手机/电脑聊天记录界面",
+    LOCATION: "定位轨迹图或位置记录",
+    FORENSIC: "鉴定报告、样本袋或检验台",
+    OBJECT: "封存物证或现场物件特写",
+    MAP: "地图、平面图或路线标记图",
+    DIARY: "笔记本、日记页或手写记录",
+    WITNESS: "证词笔录、访谈记录或录音设备",
+  };
+  return carriers[type] ?? "证据文件或物证载体";
+}
+
+function normalizeEvidenceVisibleData({
+  caseData,
+  fallbackText,
+  rawVisibleData,
+  source,
+  state,
+  title,
+  type,
+}: {
+  caseData: CaseData;
+  fallbackText: string;
+  rawVisibleData: Record<string, unknown>;
+  source: string;
+  state: PlayerCaseState;
+  title: string;
+  type: Evidence["type"];
+}) {
+  const rawSummary = compactRuntimeValue(rawVisibleData.summary);
+  const fallbackSummary = compactRuntimeValue(rawVisibleData) || fallbackText || title;
+  const summary = rawSummary || fallbackSummary;
+  const existingDetails = asStringArray(rawVisibleData.visibleDetails);
+  const detailCandidates = [
+    ...existingDetails,
+    ...summary.split(/[。！？\n；;]/).map((line) => line.trim()).filter(Boolean),
+    source,
+  ];
+  const currentLocationName = caseData.locations.find((location) => location.id === state.currentLocation)?.name;
+
+  return {
+    ...rawVisibleData,
+    summary,
+    visualSubject: asString(rawVisibleData.visualSubject, title),
+    visualCarrier: asString(rawVisibleData.visualCarrier, visualCarrierForEvidenceType(type)),
+    visibleDetails: Array.from(new Set(detailCandidates)).slice(0, 5),
+    ...(asString(rawVisibleData.timeWindow) || firstTimeText(summary)
+      ? { timeWindow: asString(rawVisibleData.timeWindow, firstTimeText(summary)) }
+      : {}),
+    ...(asString(rawVisibleData.locationCue) || currentLocationName
+      ? { locationCue: asString(rawVisibleData.locationCue, currentLocationName) }
+      : {}),
+    ...(asString(rawVisibleData.abnormalPoint)
+      ? { abnormalPoint: asString(rawVisibleData.abnormalPoint) }
+      : /异常|空档|补录|不一致|缺失|断电|重启|改动|可疑/.test(summary)
+        ? { abnormalPoint: summary.split(/[。！？\n]/).find((line) => /异常|空档|补录|不一致|缺失|断电|重启|改动|可疑/.test(line))?.trim() ?? summary }
+        : {}),
+  };
+}
+
 function normalizeTextForMatch(value: string) {
   return value.toLowerCase().replace(/[\s"'“”‘’《》<>【】[\]（）()，,。.:：;；、_-]+/g, "");
 }
@@ -152,6 +253,12 @@ function recentMessages(history: SessionChatMessage[]) {
 
 function hiddenTruthSeed(caseData: CaseData) {
   return {
+    fieldSemantics: {
+      victim: "受影响当事人或关键利益方，不一定是死者。",
+      killer: "主要责任人/关键隐瞒者，不一定杀人。",
+      method: "事件形成机制、违规操作或作案手法。",
+      deathTime: "关键发生时间点，不一定是死亡时间。",
+    },
     title: caseData.title,
     theme: caseData.theme,
     victim: caseData.victim,
@@ -215,13 +322,15 @@ ${JSON.stringify(recentMessages(history), null, 2)}
 
 生成原则：
 - 用户问“查/调取/看/翻/问某个记录或物件”，你必须直接生成一条查到的记录、事件、证词或物证，不要说“建议去查”。
-- 生成的新发现必须最终服务于隐藏真相种子，不能改真凶、动机、手法。
+- 生成的新发现必须最终服务于隐藏真相种子，不能改主要责任人、动机和事件形成机制。
 - 可以动态新增证据、地点、嫌疑人、时间线和关系；新增内容要具体，有时间、地点、记录细节或人物行为。
-- 不要一次性给出最终凶手。把真相拆成多轮可追查的矛盾。
+- 不要一次性给出最终责任人或完整真相。把真相拆成多轮可追查的矛盾。
+- 不要把非命案强行写成凶杀、尸体、死亡时间或杀人手法；跟随本案主题生成合理事件细节。
 - reply 是中间聊天框直接显示的话，要像一个真人搭档在旁边低声过线索：用“我刚翻到/我看了下/这儿有个不对劲/先别急着定论”。
 - reply 禁止写成旁白或系统播报：不要出现“你一开口”“旁边的 AI 副手”“立刻把重点拎出来”“最值得先碰的是三样东西”这类句子。
 - reply 不要堆并列说明，不要用报告腔解释“账册能看出、药箱如果、控制台则关系到”。要先说眼前发现，再说为什么值得追。
 - 如果本轮问的是进出记录，就造一段进出记录；问监控，就造监控片段；问账册，就造账册异常；问某人，就造口供反应。
+- 如果生成 evidence，visibleData 不能只填 summary；必须多填 visualSubject、visualCarrier、visibleDetails、timeWindow/locationCue/abnormalPoint 中能从回答里支撑的字段，方便后续生成强相关证据图。
 - 返回严格 JSON，不要 markdown。
 
 JSON 格式：
@@ -234,7 +343,16 @@ JSON 格式：
         "title": "证据标题",
         "type": "ACCESS_LOG|CCTV|CALL_LOG|DIARY|RECEIPT|WITNESS|FORENSIC|CHAT|LOCATION|FINANCIAL|OBJECT|MAP",
         "source": "来源",
-        "visibleData": {"summary":"玩家可见内容"},
+        "visualTemplate": "document|cctv_frame|access_log|ledger_page|chat_screen|call_log|map_trace|object_photo|forensic_report|statement_file",
+        "visibleData": {
+          "summary": "玩家可见内容",
+          "visualSubject": "这张图应该聚焦的证据本体，例如门禁终端屏幕/监控画面/账册某一页/药箱缺口",
+          "visualCarrier": "证据载体，例如监控控制台、门岗终端、纸质账册、手机聊天界面、封存物证袋",
+          "visibleDetails": ["画面中能看到的具体细节，至少 2 条"],
+          "timeWindow": "如果回答里有时间，填时间段",
+          "locationCue": "如果回答里有地点，填地点线索",
+          "abnormalPoint": "这条证据最可视化的异常点"
+        },
         "proves": ["它支持的推理点"],
         "contradicts": ["它制造的矛盾"],
         "relatedSuspects": ["suspect-id"],
@@ -279,7 +397,8 @@ ${JSON.stringify(recentMessages(history), null, 2)}
 - 不要在回答末尾主动安排“下一位问谁/接下来查两样/我建议一二三”。除非玩家明确问下一步，否则只说本轮查到的内容和一个很轻的判断。
 - 不要说“没有这个证据”“查不到”“尚未发现”。证据就是这一轮被调出来的。
 - 新内容要具体：至少包含时间、地点、人员、记录来源或异常点中的 2 类。
-- 不能直接说出最终凶手或完整真相；用可继续追查的矛盾把玩家引向隐藏真相。
+- 不能直接说出最终责任人或完整真相；用可继续追查的矛盾把玩家引向隐藏真相。
+- 不要把非命案强行写成凶杀、尸体、死亡时间或杀人手法；跟随本案主题生成合理事件细节。
 - 说话要像真人搭档，不像系统总结。优先第一人称：“我刚翻到...”“这里有个细节不太顺...”“先把这条扣住。”
 - 禁止旁白腔：不要写“你一开口”“旁边的 AI 副手”“立刻把重点拎出来”“最值得先碰的是三样东西”。
 - 禁止报告腔：不要连续使用“能看出/如果...就说明/则关系到/一旦...就能”来讲道理。
@@ -342,6 +461,7 @@ ${JSON.stringify(recentMessages(history), null, 2)}
 - 如果回答中出现新地点或可继续追查的物件，可以生成 locations。
 - 如果回答中出现新人物，可以生成 suspects；如果只是已有嫌疑人，不要重复创建。
 - 相关嫌疑人和地点 id 优先使用现有 id。
+- 如果生成 evidence，visibleData 不能只填 summary；必须多填 visualSubject、visualCarrier、visibleDetails、timeWindow/locationCue/abnormalPoint 中能从已显示回答支撑的字段，方便后续生成强相关证据图。
 - 返回严格 JSON，不要 markdown。
 
 JSON 格式：
@@ -353,7 +473,16 @@ JSON 格式：
         "title": "证据标题",
         "type": "ACCESS_LOG|CCTV|CALL_LOG|DIARY|RECEIPT|WITNESS|FORENSIC|CHAT|LOCATION|FINANCIAL|OBJECT|MAP",
         "source": "来源",
-        "visibleData": {"summary":"玩家可见内容"},
+        "visualTemplate": "document|cctv_frame|access_log|ledger_page|chat_screen|call_log|map_trace|object_photo|forensic_report|statement_file",
+        "visibleData": {
+          "summary": "玩家可见内容",
+          "visualSubject": "这张图应该聚焦的证据本体，例如门禁终端屏幕/监控画面/账册某一页/药箱缺口",
+          "visualCarrier": "证据载体，例如监控控制台、门岗终端、纸质账册、手机聊天界面、封存物证袋",
+          "visibleDetails": ["画面中能看到的具体细节，至少 2 条"],
+          "timeWindow": "如果回答里有时间，填时间段",
+          "locationCue": "如果回答里有地点，填地点线索",
+          "abnormalPoint": "这条证据最可视化的异常点"
+        },
         "proves": ["它支持的推理点"],
         "contradicts": ["它制造的矛盾"],
         "relatedSuspects": ["suspect-id"],
@@ -379,15 +508,34 @@ function normalizeEvidence(raw: unknown, caseData: CaseData, state: PlayerCaseSt
   const id = idWithPrefix("evidence", item.id, title, existing);
   const type = oneOf(item.type, ["CCTV", "CALL_LOG", "ACCESS_LOG", "DIARY", "RECEIPT", "WITNESS", "FORENSIC", "CHAT", "LOCATION", "FINANCIAL", "OBJECT", "MAP"] as const, "OBJECT");
   const currentLocation = state.currentLocation ? [state.currentLocation] : [];
-  const visibleSummary = Object.values(asRecord(item.visibleData)).map(String).join("\n");
+  const source = asString(item.source, "运行时调查");
+  const visualTemplate = asString(item.visualTemplate, visualTemplateForEvidenceType(type));
+  const rawVisibleData = asRecord(item.visibleData);
+  const fallbackText = [
+    title,
+    source,
+    ...Object.values(rawVisibleData).map(compactRuntimeValue),
+    ...asStringArray(item.proves),
+    ...asStringArray(item.contradicts),
+  ].filter(Boolean).join("\n");
+  const visibleData = normalizeEvidenceVisibleData({
+    caseData,
+    fallbackText,
+    rawVisibleData,
+    source,
+    state,
+    title,
+    type,
+  });
+  const visibleSummary = Object.values(visibleData).map(compactRuntimeValue).join("\n");
   const suspectText = `${title}\n${asString(item.source)}\n${visibleSummary}\n${asStringArray(item.proves).join("\n")}\n${asStringArray(item.contradicts).join("\n")}\n${asStringArray(item.supports).join("\n")}`;
   return {
     id,
     title,
     type,
-    source: asString(item.source, "运行时调查"),
-    visualTemplate: asString(item.visualTemplate, "document"),
-    visibleData: asRecord(item.visibleData),
+    source,
+    visualTemplate,
+    visibleData,
     hiddenMetadata: {},
     proves: asStringArray(item.proves),
     contradicts: asStringArray(item.contradicts),
@@ -555,6 +703,9 @@ export function createFallbackRuntimeDiscoveryFromReply({
   const title = input.length > 18 ? `调查记录：${input.slice(0, 18)}...` : `调查记录：${input}`;
   const time = firstTimeText(reply);
   const createEvidence = shouldCreateFallbackEvidence(input, reply);
+  const fallbackEvidenceType = evidenceTypeFromText(`${input}\n${reply}`);
+  const fallbackLocation = caseData.locations.find((location) => location.id === state.currentLocation)?.name;
+  const fallbackDetails = reply.split(/[。！？\n]/).map((line) => line.trim()).filter(Boolean).slice(0, 4);
   const discoveries: RuntimeDiscoveries = {
     ...emptyDiscoveries,
     evidence: createEvidence
@@ -562,10 +713,17 @@ export function createFallbackRuntimeDiscoveryFromReply({
           {
             id: evidenceId,
             title,
-            type: evidenceTypeFromText(`${input}\n${reply}`),
+            type: fallbackEvidenceType,
             source: "本轮实时调查",
+            visualTemplate: visualTemplateForEvidenceType(fallbackEvidenceType),
             visibleData: {
               summary: reply,
+              visualSubject: title,
+              visualCarrier: visualCarrierForEvidenceType(fallbackEvidenceType),
+              visibleDetails: fallbackDetails,
+              ...(time ? { timeWindow: time } : {}),
+              ...(fallbackLocation ? { locationCue: fallbackLocation } : {}),
+              ...(reply.match(/异常|空档|补录|不一致|缺失|断电|重启|改动|可疑/) ? { abnormalPoint: reply } : {}),
             },
             proves: ["形成一条可继续核验的调查记录"],
             contradicts: /异常|空档|补录|不一致|没有对应|可疑|改动/.test(reply)
