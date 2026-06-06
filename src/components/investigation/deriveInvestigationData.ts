@@ -15,9 +15,6 @@ export function deriveInvestigationData(
     currentLocation?.objects.filter((object) =>
       object.visibleConditions.every((condition) => state.discoveredEvidence.includes(condition)),
     ) ?? [];
-  const visibleRelationships = caseData.relationships.filter((relationship) =>
-    relationship.relatedEvidence.some((evidenceId) => state.discoveredEvidence.includes(evidenceId)),
-  );
   const entityNameById = new Map<string, string>([
     [caseData.victim.id, caseData.victim.name],
     ...caseData.suspects.map((suspect) => [suspect.id, suspect.name] as const),
@@ -25,6 +22,29 @@ export function deriveInvestigationData(
     ...caseData.locations.map((location) => [location.id, location.name] as const),
     ...caseData.evidence.map((evidence) => [evidence.id, evidence.title] as const),
   ]);
+  const discoveredEvidenceIds = new Set(state.discoveredEvidence);
+  const personEntityIds = new Set([
+    caseData.victim.id,
+    ...caseData.suspects.map((suspect) => suspect.id),
+    ...caseData.witnesses.map((witness) => witness.id),
+  ]);
+  const visibleRelationshipsById = new Map<string, CaseData["relationships"][number]>();
+  const addRelationship = (relationship: CaseData["relationships"][number]) => {
+    if (!entityNameById.has(relationship.from) || !entityNameById.has(relationship.to)) return;
+    if (!personEntityIds.has(relationship.from) || !personEntityIds.has(relationship.to)) return;
+    if (relationship.from === relationship.to) return;
+    visibleRelationshipsById.set(relationship.id, relationship);
+  };
+  const relationshipIsRevealed = (relationship: CaseData["relationships"][number]) =>
+    relationship.relatedEvidence.length === 0 || relationship.relatedEvidence.some((evidenceId) => discoveredEvidenceIds.has(evidenceId));
+
+  caseData.relationships
+    .filter(relationshipIsRevealed)
+    .forEach(addRelationship);
+  state.playerRelationships
+    .filter(relationshipIsRevealed)
+    .forEach(addRelationship);
+  const visibleRelationships = Array.from(visibleRelationshipsById.values());
   const recommendedCommands = [
     ...availableClues.slice(0, 2).map((clue) => `调查${clue.name}`),
     ...unlockedLocations

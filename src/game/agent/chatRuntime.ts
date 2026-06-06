@@ -11,6 +11,16 @@ export type ChatRoute =
   | { kind: "suspect_question"; suspect: SuspectProfile }
   | { kind: "case_assistant" };
 
+export const offTopicReply =
+  "我在，但我这边先守着这起案子的调查。你想查监控、门禁、证词，还是让我先帮你捋一遍已有线索？";
+
+export const spoilerRequestReply =
+  "我不能直接替你定最终责任人。我们先按证据往下拆，我可以帮你比对人物动机、机会和口供矛盾。";
+
+export function buildRefusalReply(route: Extract<ChatRoute, { kind: "off_topic" | "spoiler_request" }>) {
+  return route.kind === "off_topic" ? offTopicReply : spoilerRequestReply;
+}
+
 const offTopicKeywords = [
   "天气",
   "日报",
@@ -83,11 +93,11 @@ export function routeChatCommand(
   );
 
   if (!hasCaseEntity && offTopicKeywords.some((keyword) => text.includes(normalize(keyword)))) {
-    return { kind: "off_topic", reason: "当前窗口只接入本案调查，不处理普通办公问答。" };
+    return { kind: "off_topic", reason: offTopicReply };
   }
 
   if (spoilerPatterns.some((keyword) => text.includes(normalize(keyword)))) {
-    return { kind: "spoiler_request", reason: "我不能直接替你定最终责任人，但可以把当前人物按动机、机会和口供矛盾拆开比对。" };
+    return { kind: "spoiler_request", reason: spoilerRequestReply };
   }
 
   const suspect =

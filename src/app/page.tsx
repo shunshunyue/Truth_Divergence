@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
-import Link from "next/link";
-import { ArrowRight, FileSearch, Fingerprint, ScanLine, Sparkles } from "lucide-react";
+import { FileSearch, Fingerprint, ScanLine, Sparkles } from "lucide-react";
+import { StartInvestigationButton } from "@/components/home/StartInvestigationButton";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -82,13 +82,7 @@ export default function Home() {
         </div>
 
         <div className="td-home-rise td-home-rise-final grid gap-4 pb-2 lg:grid-cols-[auto_minmax(20rem,1fr)] lg:items-end">
-          <Link
-            className="group inline-flex min-h-14 w-fit items-center gap-3 border border-[#143b37] bg-[#163c3a] px-6 font-mono text-xs font-bold text-[#eafffb] shadow-[0_18px_44px_rgba(22,60,58,0.25)] transition hover:bg-[#24615b]"
-            href="/play"
-          >
-            开始处理今天的事
-            <ArrowRight className="transition group-hover:translate-x-1" size={17} />
-          </Link>
+          <StartInvestigationButton coverSrc={coverSrc} />
 
           <div className="flex flex-wrap items-center gap-2 text-[#fffdf7] lg:justify-end">
             {caseSignals.map((item, index) => (

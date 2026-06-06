@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { claimRandomReadyCase } from "@/game/cache/caseCache";
+import { claimRandomReadyCase, countReadyCases } from "@/game/cache/caseCache";
 import { ensureCaseCacheWorkerStarted } from "@/game/cache/caseCacheWorker";
 import {
   createPendingEvidenceVisualAsset,
@@ -25,6 +25,7 @@ import {
 } from "@/game/agent/runtimeDiscovery";
 import {
   buildAssistantReply,
+  buildRefusalReply,
   buildSuspectReply,
   routeChatCommand,
   type ChatMode,
@@ -77,6 +78,15 @@ type FinalizeActionOptions = {
   resultText: string;
   sessionId: string;
 };
+
+const caseCacheClaimPollMs = 2_000;
+const caseCacheStatusEveryMs = 10_000;
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 function sessionPayload(
   session: GameSession,
@@ -308,7 +318,9 @@ function shouldUseRuntimeDiscovery(input: string, result: ActionResult) {
     "REQUEST_EVIDENCE",
     "OPEN_EVIDENCE",
     "GO_TO_LOCATION",
+    "BUILD_RELATIONSHIP",
   ];
+  const asksForRelationshipMap = /关系图|人物关系|关系网|关系线|整理关系|梳理关系|拓扑/.test(normalized);
   const asksForMaterial =
     /查|调取|查看|看一下|翻|检查|调查|打开|读取|核对|记录|日志|监控|录像|门禁|门岗|登记|账册|账本|药箱|物证|证词|口供|鉴定|报告|通话|短信|聊天|定位|票据|收据|小票|指纹|血迹|痕迹|控制台/.test(
       normalized,
@@ -317,7 +329,12 @@ function shouldUseRuntimeDiscovery(input: string, result: ActionResult) {
     /总结|整理|复盘|分析|建议|下一步|方向|怎么看|怎么想|推理一下|帮我想|怀疑谁|可疑/.test(normalized) &&
     !/查|调取|查看|翻|检查|调查|记录|日志|监控|门禁|账册|物证|证词|口供/.test(normalized);
 
-  return !asksForThinkingOnly && (discoveryIntents.includes(result.parsedAction.intent) || asksForMaterial);
+  return asksForRelationshipMap || (!asksForThinkingOnly && (discoveryIntents.includes(result.parsedAction.intent) || asksForMaterial));
+}
+
+function shouldStructureRelationshipMapNow(input: string, result: ActionResult) {
+  const normalized = input.toLowerCase().replace(/\s+/g, "");
+  return result.parsedAction.intent === "BUILD_RELATIONSHIP" || /关系图|人物关系|关系网|关系线|整理关系|梳理关系|拓扑/.test(normalized);
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -382,9 +399,35 @@ export class RoomAgentRuntime {
     this.enqueueError(message, sessionId);
   }
 
+  private async claimCachedCaseWhenReady() {
+    let nextStatusAt = 0;
+    const startedAt = Date.now();
+
+    while (true) {
+      const cachedCase = await claimRandomReadyCase();
+      if (cachedCase) return cachedCase;
+
+      const now = Date.now();
+      if (now >= nextStatusAt) {
+        const ready = await countReadyCases();
+        const waitedSeconds = Math.max(1, Math.round((now - startedAt) / 1000));
+        this.enqueueStatus(
+          ready > 0
+            ? "案件缓存刚补上但被占用，正在重新领取..."
+            : `案件缓存池暂时为空，正在等待后台补充缓存... 已等待 ${waitedSeconds} 秒`,
+          "critical",
+        );
+        nextStatusAt = now + caseCacheStatusEveryMs;
+      }
+
+      ensureCaseCacheWorkerStarted();
+      await delay(caseCacheClaimPollMs);
+    }
+  }
+
   async start() {
     if (this.running) {
-      this.enqueueStatus("上一条调查指令仍在处理中。", "normal");
+      this.enqueueStatus(this.sessionId ? "上一条调查指令仍在处理中。" : "正在等待案件缓存补充，拿到后会自动开局。", "normal");
       return;
     }
 
@@ -393,10 +436,7 @@ export class RoomAgentRuntime {
       ensureCaseCacheWorkerStarted();
       this.enqueueStatus("正在从案件缓存池领取未使用案件...", "critical");
 
-      const cachedCase = await claimRandomReadyCase();
-      if (!cachedCase) {
-        throw new Error("案件缓存池暂无可用案件。请先运行 npm run cache:worker，或等待后台补充缓存。");
-      }
+      const cachedCase = await this.claimCachedCaseWhenReady();
 
       this.enqueueStatus("案件已领取，正在创建本局调查会话...", "critical");
       const session = createSession({
@@ -455,6 +495,40 @@ export class RoomAgentRuntime {
     }
   }
 
+  async resume(sessionId: string) {
+    const session = getSession(sessionId);
+    if (!session) throw new Error("本局调查已失效，请重新开始。");
+
+    this.sessionId = session.sessionId;
+    this.enqueueStatus("已恢复当前案件进度。", "critical", session.sessionId);
+    this.enqueue(
+      {
+        event: "session.ready",
+        channel: "game",
+        payload: sessionPayload(session, "案件进度已恢复。"),
+      },
+      { priority: "critical", sessionId: session.sessionId, scope: "session.resume" },
+    );
+
+    this.scheduleOpeningMetadata(session);
+    this.enqueueBackgroundMetadata(session);
+    if (session.visualManifest) {
+      this.enqueueVisualManifest(session);
+      const focusAsset = this.visualAssetFor(session.visualManifest, {
+        entityId: session.state.currentLocation || session.caseData.id,
+      });
+      this.enqueueVisualFocus(session, {
+        mode: focusAsset?.kind === "location" ? "scene" : "case",
+        entityId: focusAsset?.entityId ?? session.caseData.id,
+        asset: focusAsset,
+        reason: "assistant_reference",
+        intensity: "quiet",
+      });
+    }
+    this.enqueueChatMode(this.chatMode, session.sessionId);
+    this.scheduleIdleHint(session);
+  }
+
   async command(sessionId: string, input: string) {
     if (this.running) {
       this.enqueueStatus("上一条调查指令仍在处理中。", "normal", sessionId);
@@ -510,7 +584,7 @@ export class RoomAgentRuntime {
           },
           { priority: "critical", sessionId, scope: "chat.refusal" },
         );
-        const refusalText = `${route.reason}\n你可以换成基于证据的问题，例如“比较已发现证据里的时间矛盾”或“用某份证据追问某个人”。`;
+        const refusalText = buildRefusalReply(route);
         this.streamChatMessage({
           sessionId,
           turnId,
@@ -537,6 +611,7 @@ export class RoomAgentRuntime {
       let activeChatMode = this.chatMode;
       let discovery: RuntimeDiscovery | undefined;
       let shouldStructureDiscovery = false;
+      let shouldStructureRelationshipMap = false;
       let runtimeHistory = getSession(sessionId)?.chatHistory ?? session.chatHistory;
 
       if (route.kind === "start_interrogation" || route.kind === "suspect_question") {
@@ -555,7 +630,12 @@ export class RoomAgentRuntime {
         }
         activeChatMode = this.chatMode;
         shouldStructureDiscovery = shouldUseRuntimeDiscovery(trimmed, result);
-        this.enqueueStatus(shouldStructureDiscovery ? "正在调取相关记录..." : "正在整理线索...", "critical", sessionId);
+        shouldStructureRelationshipMap = shouldStructureRelationshipMapNow(trimmed, result);
+        this.enqueueStatus(
+          shouldStructureRelationshipMap ? "正在梳理人物关系..." : shouldStructureDiscovery ? "正在调取相关记录..." : "正在整理线索...",
+          "critical",
+          sessionId,
+        );
         runtimeHistory = getSession(sessionId)?.chatHistory ?? session.chatHistory;
         replyText = buildAssistantReply(trimmed, session.caseData, result.state, result);
       }
@@ -579,12 +659,35 @@ export class RoomAgentRuntime {
           result,
           state: result.state,
         });
-        discovery = createFallbackRuntimeDiscoveryFromReply({
+        const fallbackDiscovery = createFallbackRuntimeDiscoveryFromReply({
           input: trimmed,
           reply: replyText,
           caseData: session.caseData,
           state: result.state,
         });
+        discovery = fallbackDiscovery;
+        let structuredSynchronously = false;
+        if (shouldStructureRelationshipMap) {
+          try {
+            this.enqueueStatus("正在梳理人物关系...", "critical", sessionId);
+            discovery = await withTimeout(
+              structureRuntimeDiscoveryFromReply({
+                input: trimmed,
+                reply: replyText,
+                caseData: session.caseData,
+                history: runtimeHistory,
+                result,
+                state: result.state,
+              }),
+              15000,
+              "人物关系归档超时。",
+            );
+            structuredSynchronously = true;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "人物关系归档失败。";
+            this.enqueueStatus(`人物关系先等后台精细归档：${message.slice(0, 80)}`, "background", sessionId);
+          }
+        }
         const finalCaseData = discovery.caseData;
         const finalState = discovery.state;
         const finalResultText = replyText || discovery.reply || result.resultText;
@@ -621,19 +724,21 @@ export class RoomAgentRuntime {
         );
         this.finishTurn(sessionId, turnId);
         this.running = false;
-        this.structureDiscoveryInBackground({
-          input: trimmed,
-          reply: replyText,
-          caseData: finalCaseData,
-          history: getSession(sessionId)?.chatHistory ?? runtimeHistory,
-          result: {
-            ...result,
+        if (!structuredSynchronously) {
+          this.structureDiscoveryInBackground({
+            input: trimmed,
+            reply: replyText,
+            caseData: finalCaseData,
+            history: getSession(sessionId)?.chatHistory ?? runtimeHistory,
+            result: {
+              ...result,
+              state: finalState,
+            },
+            sessionId,
             state: finalState,
-          },
-          sessionId,
-          state: finalState,
-          fallbackDiscovery: discovery,
-        });
+            fallbackDiscovery,
+          });
+        }
         this.scheduleIdleHint(visualSession);
         return;
       } else {

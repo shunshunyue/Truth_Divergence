@@ -245,10 +245,19 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
       resultText = `已整理时间线，目前包含 ${state.playerTimeline.length} 个已知事件。`;
       break;
     case "BUILD_RELATIONSHIP":
-      state.playerRelationships = caseData.relationships.filter((relationship) =>
-        relationship.relatedEvidence.some((evidenceId) => state.discoveredEvidence.includes(evidenceId)),
-      );
-      resultText = `关系图已更新，当前包含 ${state.playerRelationships.length} 条有证据支撑的关系。`;
+      {
+        const discoveredEvidenceIds = new Set(state.discoveredEvidence);
+        const relationshipsById = new Map(state.playerRelationships.map((relationship) => [relationship.id, relationship]));
+        caseData.relationships
+          .filter(
+            (relationship) =>
+              relationship.relatedEvidence.length === 0 ||
+              relationship.relatedEvidence.some((evidenceId) => discoveredEvidenceIds.has(evidenceId)),
+          )
+          .forEach((relationship) => relationshipsById.set(relationship.id, relationship));
+        state.playerRelationships = Array.from(relationshipsById.values());
+      }
+      resultText = `关系图已更新，当前包含 ${state.playerRelationships.length} 条人物关系。`;
       break;
     case "ASK_ASSISTANT":
       resultText =

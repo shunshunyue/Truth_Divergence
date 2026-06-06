@@ -108,6 +108,8 @@ function generationPrompt() {
   - timeline 必须返回空数组 []。
   - relationships 必须返回空数组 []。
   - locations 只返回 1 个开局地点，objects 生成 3-5 个可探索入口，比如“门岗记录终端”“设备日志”“合同附件”“异常账页”“监控控制台”“样本柜”。这些 object 的 unlocksEvidence/unlocksSuspects/unlocksLocations 全部用 []，运行时再动态追加。
+  - 每个 object.description 必须包含 1-2 个玩家肉眼能注意到、但不能直接定案的“可视化异常”，例如：缺帧缩略格、被圈出的时间行、受潮页角、异常空槽、重复刷卡行、临时贴纸、划痕、封条翘边、方向不一致的水印、被折起的票据角。不要只写“可能查到记录/值得细查”这种泛描述。
+  - 这些可视化异常必须能自然引导玩家追问，但不能直接暴露最终责任人、完整作案/操作机制或决定性结论。
   - suspects 生成 3-5 个完整隐藏人物种子，其中必须有且只有 1 个 isKiller=true，含义是“最终责任核心/关键隐瞒者”。
   - witnesses 可生成 1-3 个简短人物种子。
   - truth 里必须指定 killer、motive、method、deathTime；keyEvidence/keyTimeline 可先返回 []，运行时动态补。truth 必须能被证据链合理推出，不能靠巧合或超自然解释。

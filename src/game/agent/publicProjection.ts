@@ -1,4 +1,5 @@
 import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
+import { sortTimelineEvents } from "@/game/engine/timelineSort";
 
 function redactEvidence(evidence: CaseData["evidence"][number]): CaseData["evidence"][number] {
   return {
@@ -120,13 +121,36 @@ export function buildVisibleClues(caseData: CaseData, state: PlayerCaseState) {
 }
 
 export function buildVisibleTimeline(state: PlayerCaseState) {
-  return state.playerTimeline;
+  return sortTimelineEvents(state.playerTimeline);
+}
+
+function relationshipPersonIds(caseData: CaseData) {
+  return new Set([
+    caseData.victim.id,
+    ...caseData.suspects.map((suspect) => suspect.id),
+    ...caseData.witnesses.map((witness) => witness.id),
+  ]);
 }
 
 export function buildVisibleRelationships(caseData: CaseData, state: PlayerCaseState) {
-  return buildPublicCaseData(caseData).relationships.filter((relationship) =>
-    relationship.relatedEvidence.some((evidenceId) => state.discoveredEvidence.includes(evidenceId)),
-  );
+  const publicCase = buildPublicCaseData(caseData);
+  const personIds = relationshipPersonIds(publicCase);
+  const discoveredEvidenceIds = new Set(state.discoveredEvidence);
+  const visibleById = new Map<string, CaseData["relationships"][number]>();
+  const addRelationship = (relationship: CaseData["relationships"][number]) => {
+    if (!personIds.has(relationship.from) || !personIds.has(relationship.to)) return;
+    if (relationship.from === relationship.to) return;
+    const revealed =
+      relationship.relatedEvidence.length === 0 ||
+      relationship.relatedEvidence.some((evidenceId) => discoveredEvidenceIds.has(evidenceId));
+    if (!revealed) return;
+    visibleById.set(relationship.id, relationship);
+  };
+
+  publicCase.relationships.forEach(addRelationship);
+  state.playerRelationships.forEach(addRelationship);
+
+  return Array.from(visibleById.values());
 }
 
 export function buildRecommendedCommands(caseData: CaseData, state: PlayerCaseState) {

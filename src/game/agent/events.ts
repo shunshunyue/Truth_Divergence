@@ -204,6 +204,11 @@ export type AgentClientMessage =
       roomId?: string;
     }
   | {
+      type: "session.resume";
+      roomId?: string;
+      sessionId: string;
+    }
+  | {
       type: "player.command";
       sessionId: string;
       input: string;

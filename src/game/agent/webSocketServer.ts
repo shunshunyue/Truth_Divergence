@@ -15,6 +15,14 @@ function parseClientMessage(raw: WebSocket.RawData): AgentClientMessage {
     };
   }
 
+  if (parsed.type === "session.resume") {
+    return {
+      type: "session.resume",
+      roomId: typeof parsed.roomId === "string" ? parsed.roomId : undefined,
+      sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : "",
+    };
+  }
+
   if (parsed.type === "player.command") {
     return {
       type: "player.command",
@@ -47,6 +55,15 @@ export function createAgentWebSocketServer() {
     let roomAgent = getOrCreateRoomAgent("default");
     let unsubscribe = roomAgent.subscribe(send);
 
+    function switchRoom(roomId?: string) {
+      const nextRoomAgent = getOrCreateRoomAgent(roomId ?? "default");
+      if (nextRoomAgent !== roomAgent) {
+        unsubscribe();
+        roomAgent = nextRoomAgent;
+        unsubscribe = roomAgent.subscribe(send);
+      }
+    }
+
     socket.on("message", (raw) => {
       Promise.resolve()
         .then(async () => {
@@ -55,13 +72,14 @@ export function createAgentWebSocketServer() {
           console.log(`[agent:ws] received ${message.type}`);
 
           if (message.type === "session.start") {
-            const nextRoomAgent = getOrCreateRoomAgent(message.roomId ?? "default");
-            if (nextRoomAgent !== roomAgent) {
-              unsubscribe();
-              roomAgent = nextRoomAgent;
-              unsubscribe = roomAgent.subscribe(send);
-            }
+            switchRoom(message.roomId);
             await roomAgent.start();
+            return;
+          }
+
+          if (message.type === "session.resume") {
+            switchRoom(message.roomId);
+            await roomAgent.resume(message.sessionId);
             return;
           }
 

@@ -1,43 +1,66 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { BriefingScreen } from "@/components/investigation/BriefingModal";
 import {
   CenterStage,
+  ExitCaseConfirmModal,
   LeftDrawer,
   RelationshipModal,
-  RightRail,
   TimelineModal,
   VisualReadyModal,
 } from "@/components/investigation/InvestigationShell";
 import { useInvestigationSession } from "@/components/investigation/useInvestigationSession";
 
 export function InvestigationClient() {
+  const router = useRouter();
   const [input, setInput] = useState("");
   const [relationshipOpen, setRelationshipOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [exitPrompt, setExitPrompt] = useState<"manual" | "solved" | null>(null);
+  const solvedPromptedSessionRef = useRef<string | null>(null);
 
   const investigation = useInvestigationSession();
   const session = investigation.session;
   const state = session?.state;
+
+  useEffect(() => {
+    if (state?.phase !== "solved" || !session?.sessionId) return;
+    if (solvedPromptedSessionRef.current === session.sessionId) return;
+    solvedPromptedSessionRef.current = session.sessionId;
+    setExitPrompt("solved");
+  }, [session?.sessionId, state?.phase]);
 
   async function submitCommand(command: string) {
     const accepted = await investigation.submitCommand(command);
     if (accepted) setInput("");
   }
 
+  function confirmExitCase() {
+    investigation.discardSession();
+    router.push("/");
+  }
+
   return (
-    <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#ede8dc] text-[#27241f]">
+    <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#d9d2c4] text-[#27241f]">
       {session && investigation.showBriefing ? (
         <BriefingScreen session={session} onClose={() => investigation.setShowBriefing(false)} />
       ) : (
-      <div className="grid min-h-0 flex-1 grid-cols-[3rem_minmax(0,1fr)] overflow-hidden md:grid-cols-[3rem_minmax(0,1fr)_240px]">
+      <div className="td-case-shell m-2 grid min-h-0 flex-1 grid-cols-[3.25rem_minmax(0,1fr)] overflow-hidden rounded-lg border border-[#c8bda7]">
         {/* Left drawer */}
         <LeftDrawer
+          actionStatus={investigation.actionStatus}
+          activeStep={investigation.activeBootStep}
+          bootProgress={investigation.bootProgress}
           data={investigation.data}
           isActing={investigation.isActing}
           isBooting={investigation.isBooting}
+          state={state}
           setInput={setInput}
+          visualFocus={investigation.visualFocus}
+          onOpenRelationship={() => setRelationshipOpen(true)}
+          onOpenTimeline={() => setTimelineOpen(true)}
         />
 
         {/* Center chat */}
@@ -54,7 +77,6 @@ export function InvestigationClient() {
             state?.phase === "solved"
           }
           currentLocation={investigation.data?.currentLocation}
-          evidenceCount={investigation.data?.discoveredEvidence.length ?? 0}
           input={input}
           isActing={investigation.isActing}
           isBooting={investigation.isBooting}
@@ -64,22 +86,8 @@ export function InvestigationClient() {
           visualFocus={investigation.visualFocus}
           visualManifest={investigation.session?.visualManifest}
           onCommand={submitCommand}
+          onRequestExit={() => setExitPrompt("manual")}
         />
-
-        {/* Right rail */}
-        <div className="hidden min-h-0 md:block">
-          <RightRail
-            actionStatus={investigation.actionStatus}
-            activeStep={investigation.activeBootStep}
-            bootProgress={investigation.bootProgress}
-            data={investigation.data}
-            isBooting={investigation.isBooting}
-            state={state}
-            visualFocus={investigation.visualFocus}
-            onOpenRelationship={() => setRelationshipOpen(true)}
-            onOpenTimeline={() => setTimelineOpen(true)}
-          />
-        </div>
       </div>
       )}
 
@@ -94,6 +102,14 @@ export function InvestigationClient() {
           asset={investigation.completedVisualAsset}
           onClose={investigation.dismissVisualNotice}
           onPrompt={setInput}
+        />
+      )}
+      {exitPrompt && session && (
+        <ExitCaseConfirmModal
+          caseTitle={session.caseData.title}
+          reason={exitPrompt}
+          onCancel={() => setExitPrompt(null)}
+          onConfirm={confirmExitCase}
         />
       )}
     </main>

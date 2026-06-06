@@ -234,6 +234,39 @@ function resolveSuspectIds(values: unknown, caseData: CaseData, text = "") {
     .map((suspect) => suspect.id);
 }
 
+function personRelationshipIds(caseData: CaseData) {
+  return new Set([
+    caseData.victim.id,
+    ...caseData.suspects.map((suspect) => suspect.id),
+    ...caseData.witnesses.map((witness) => witness.id),
+  ]);
+}
+
+function resolvePersonIds(values: unknown, caseData: CaseData, text = "") {
+  const requestedValues = asLooseStringArray(values);
+  const requested = new Set(requestedValues.map(normalizeTextForMatch));
+  const normalizedText = normalizeTextForMatch([text, ...requestedValues].join("\n"));
+  const people = [
+    { id: caseData.victim.id, labels: [caseData.victim.id, caseData.victim.name, caseData.victim.role] },
+    ...caseData.suspects.map((suspect) => ({
+      id: suspect.id,
+      labels: [suspect.id, suspect.name, suspect.identity, suspect.publicRelationship],
+    })),
+    ...caseData.witnesses.map((witness) => ({
+      id: witness.id,
+      labels: [witness.id, witness.name, witness.role, witness.description],
+    })),
+  ];
+
+  return people
+    .filter((person) =>
+      person.labels
+        .map(normalizeTextForMatch)
+        .some((candidate) => requested.has(candidate) || Boolean(candidate && normalizedText.includes(candidate))),
+    )
+    .map((person) => person.id);
+}
+
 function resolveExistingSuspectFromRecord(raw: unknown, caseData: CaseData) {
   const item = asRecord(raw);
   const id = asString(item.id);
@@ -324,6 +357,16 @@ ${JSON.stringify(recentMessages(history), null, 2)}
 - 用户问“查/调取/看/翻/问某个记录或物件”，你必须直接生成一条查到的记录、事件、证词或物证，不要说“建议去查”。
 - 生成的新发现必须最终服务于隐藏真相种子，不能改主要责任人、动机和事件形成机制。
 - 可以动态新增证据、地点、嫌疑人、时间线和关系；新增内容要具体，有时间、地点、记录细节或人物行为。
+- 每轮都要检查是否能沉淀时间线：只要本轮记录、口供、监控、日志、聊天、账册、证据或当前已知内容出现明确时间、时间段、先后顺序、进出、交接、停留、报警、重启、断电、补录等事件，就输出 timeline，并由后台实时推送到时间线。
+- 如果玩家要求“时间线/时间轴/轨迹/整理经过/先后顺序”，必须优先输出 timeline；普通调查轮次如果出现可定位事件，也要输出 timeline。
+- timeline.time 写玩家能看懂的时间锚点，例如“凌晨2:13”“案发前一天晚上”“门禁补录后”；description 只写一个可复盘事件，不要写分析建议。
+- timeline.source 优先填支撑证据 id；没有新证据时填 runtime-discovery。relatedEvidence 只能填真实 evidence id。
+- 每轮都要检查是否能沉淀人物关系：只要本轮记录、口供、监控、时间线或当前已知内容显示两名人物共同出现、认识、交接、合作、利益牵连、冲突、隐瞒或互相包庇，就输出 relationship，并由后台实时推送到关系图。
+- 如果玩家要求“关系图/人物关系/关系网/整理关系”，必须优先输出 relationships；普通调查轮次如果出现人物接触或关系线索，也要输出 relationships。
+- relationships.from 和 relationships.to 只能使用人物 id：受影响当事人、嫌疑人或证人。证据只能放在 relatedEvidence 里作为支撑来源。
+- relationships.label 要写清关系本身和认识/冲突/合作场景，例如“张某与李某是朋友，两人是在饭桌上认识的”，不要写成“某证据关联某人”。
+- relationships.label 不要写“某证据把某人纳入核验范围”这类泛泛关联，必须是人物之间的关系句。
+- 如果当前已经有时间线事件或已发现证据能支撑人物之间的接触、认识、利益、冲突、隐瞒、合作，就为这些人物生成 2-6 条关系；不要为了撑图创建证据节点关系。
 - 不要一次性给出最终责任人或完整真相。把真相拆成多轮可追查的矛盾。
 - 不要把非命案强行写成凶杀、尸体、死亡时间或杀人手法；跟随本案主题生成合理事件细节。
 - reply 是中间聊天框直接显示的话，要像一个真人搭档在旁边低声过线索：用“我刚翻到/我看了下/这儿有个不对劲/先别急着定论”。
@@ -364,7 +407,7 @@ JSON 格式：
     "locations": [{"id":"loc-可选","name":"地点名","kind":"类型","description":"描述","objects":[{"id":"obj-可选","name":"可查物件","description":"描述"}]}],
     "suspects": [{"id":"suspect-可选","name":"姓名","age":30,"identity":"身份","publicRelationship":"公开关系","publicStatement":"初始口供"}],
     "timeline": [{"id":"timeline-可选","time":"时间","description":"事件","source":"证据id","relatedEvidence":["evidence-id"],"relatedSuspects":["suspect-id"],"confidence":"confirmed|suspected|disputed"}],
-    "relationships": [{"id":"relationship-可选","from":"id","to":"id","type":"normal|conflict|hidden|time|evidence|misleading","status":"unknown|suspected|conflict|confirmed|excluded|key","label":"关系说明","relatedEvidence":["evidence-id"]}],
+    "relationships": [{"id":"relationship-可选","from":"人物id","to":"人物id","type":"normal|conflict|hidden|time|evidence|misleading","status":"unknown|suspected|conflict|confirmed|excluded|key","label":"人物关系说明，包含认识场景/关系性质/矛盾点","relatedEvidence":["evidence-id"]}],
     "notes": ["玩家笔记"],
     "keyEvidenceIds": ["本轮应加入 truth.keyEvidence 的证据 id"],
     "keyTimelineIds": ["本轮应加入 truth.keyTimeline 的时间线 id"]
@@ -393,6 +436,10 @@ ${JSON.stringify(recentMessages(history), null, 2)}
 
 回复原则：
 - 必须直接顺着玩家的问题给出查到的记录、事件、证词或物件细节。
+- 如果玩家要求“时间线/时间轴/轨迹/整理经过/先后顺序”，按时间或先后顺序说已知节点，不要混排。
+- 如果本轮查到明确时间、时间段、先后顺序、轨迹、出入、停留或交接，正文里自然说出时间锚点和对应事件，方便后台实时更新时间线。
+- 如果玩家要求“关系图/人物关系/关系网/整理关系”，只说人物之间的关系和关系场景，例如朋友、合作、冲突、饭桌认识、共同出现；不要把证据或地点说成关系图节点。
+- 如果本轮查到的记录里有两个人共同出现、交接、认识、冲突或互相遮掩，正文里自然点出这个人物关系线索，方便后台实时更新关系图。
 - 不要给“建议去哪里查”的列表；如果玩家说“查进出记录”，就直接写出进出记录里出现了什么。
 - 不要在回答末尾主动安排“下一位问谁/接下来查两样/我建议一二三”。除非玩家明确问下一步，否则只说本轮查到的内容和一个很轻的判断。
 - 不要说“没有这个证据”“查不到”“尚未发现”。证据就是这一轮被调出来的。
@@ -454,10 +501,20 @@ ${JSON.stringify(recentMessages(history), null, 2)}
 - 如果本轮只是分析或建议，把重点放进 notes，evidence 必须返回空数组。
 - 如果回答里只是提到“可以查某物”，但没有真的调出具体内容，也不要创建 evidence。
 - 如果回答只是围绕已有证据解释，不要为同一段解释新建 evidence；可以补 notes、timeline 或 relationship。
-- 如果 evidence/timeline/relationship 里提到已有嫌疑人，relatedSuspects/from/to 必须填对应 suspect id。不要填人名。
+- 每轮归档都要检查是否能沉淀时间线：只要已显示回答、本轮新增 evidence、当前可见证据或当前可见事件里出现明确时间、时间段、先后顺序、进出、交接、停留、报警、重启、断电、补录等，就生成 timeline，由后台实时推送到时间线。
+- 如果玩家要求“时间线/时间轴/轨迹/整理经过/先后顺序”，必须把回答和当前可见事件结构化为 timeline；普通调查轮次如果出现可定位事件，也要结构化为 timeline。
+- 可以从本轮回答和当前可见内容生成 1-6 条 timeline；没有足够时间或顺序支撑时宁可只写 notes。
+- timeline.time 必须是玩家可见的时间锚点，例如“凌晨2:13”“案发前一天晚上”“门禁补录后”；description 只写该时点发生的事；source 优先证据 id，无新证据用 runtime-discovery；relatedEvidence 只能填真实 evidence id。
+- 每轮归档都要检查是否能沉淀人物关系：只要已显示回答、本轮新增 evidence/timeline，或当前可见事件显示两名人物共同出现、认识、交接、合作、利益牵连、冲突、隐瞒或互相包庇，就生成 relationship，由后台实时推送到关系图。
+- 如果玩家要求“关系图/人物关系/关系网/整理关系”，必须把回答和当前可见事件结构化为 relationships；普通调查轮次如果出现人物接触或关系线索，也要结构化为 relationships。
+- 关系图只画人物关系，不要把证据、地点或时间线事件作为 relationship.from/to。
+- relationship.from 和 relationship.to 只能使用人物 id：受影响当事人、嫌疑人或证人。证据只允许放在 relatedEvidence 里作为支撑来源。
+- relationship.label 要写清人物关系本身和关系场景，例如“张某与李某是朋友，两人是在饭桌上认识的”；不要写成“某证据关联某人”。
+- relationship.label 不要写“某证据把某人纳入核验范围”这类泛泛关联，必须是人物之间的关系句。
+- 如果当前可见时间线、证据或口供已经支持人物之间的接触、认识、利益、冲突、隐瞒、合作，可以生成 1-6 条 relationship；没有足够支撑时宁可只写 notes。
+- 如果 evidence/timeline/relationship 里提到已有嫌疑人，relatedSuspects/from/to 必须填对应人物 id。不要填人名。
 - 如果回答中提到已有嫌疑人姓名，即使没有创建新 suspects，也要把该嫌疑人 id 写进相关 evidence.relatedSuspects、timeline.relatedSuspects 或 relationship.from/to。
 - 只有回答里出现了案卷里完全没有的新人物，才放进 suspects；已有嫌疑人绝对不要重复创建。
-- 如果回答中出现明确时间点，请生成 timeline。
 - 如果回答中出现新地点或可继续追查的物件，可以生成 locations。
 - 如果回答中出现新人物，可以生成 suspects；如果只是已有嫌疑人，不要重复创建。
 - 相关嫌疑人和地点 id 优先使用现有 id。
@@ -494,7 +551,7 @@ JSON 格式：
     "locations": [{"id":"loc-可选","name":"地点名","kind":"类型","description":"描述","objects":[{"id":"obj-可选","name":"可查物件","description":"描述"}]}],
     "suspects": [{"id":"suspect-可选","name":"姓名","age":30,"identity":"身份","publicRelationship":"公开关系","publicStatement":"初始口供"}],
     "timeline": [{"id":"timeline-可选","time":"时间","description":"事件","source":"证据id","relatedEvidence":["evidence-id"],"relatedSuspects":["suspect-id"],"confidence":"confirmed|suspected|disputed"}],
-    "relationships": [{"id":"relationship-可选","from":"id","to":"id","type":"normal|conflict|hidden|time|evidence|misleading","status":"unknown|suspected|conflict|confirmed|excluded|key","label":"关系说明","relatedEvidence":["evidence-id"]}],
+    "relationships": [{"id":"relationship-可选","from":"人物id","to":"人物id","type":"normal|conflict|hidden|time|evidence|misleading","status":"unknown|suspected|conflict|confirmed|excluded|key","label":"人物关系说明，包含认识场景/关系性质/矛盾点","relatedEvidence":["evidence-id"]}],
     "notes": ["玩家笔记"],
     "keyEvidenceIds": ["本轮应加入 truth.keyEvidence 的证据 id"],
     "keyTimelineIds": ["本轮应加入 truth.keyTimeline 的时间线 id"]
@@ -609,25 +666,44 @@ function normalizeTimeline(raw: unknown, evidence: Evidence[], caseData: CaseDat
   const item = asRecord(raw);
   const description = asString(item.description, "新时间点");
   const id = idWithPrefix("timeline", item.id, description, existing);
-  const relatedEvidence = asStringArray(item.relatedEvidence);
+  const evidenceIds = new Set([...caseData.evidence, ...evidence].map((item) => item.id));
+  const relatedEvidence = asStringArray(item.relatedEvidence).filter((evidenceId) => evidenceIds.has(evidenceId));
+  const rawSource = asString(item.source);
+  const source =
+    rawSource && (!rawSource.startsWith("evidence-") || evidenceIds.has(rawSource))
+      ? rawSource
+      : relatedEvidence[0] ?? evidence[0]?.id ?? "runtime-discovery";
   const suspectText = [description, asString(item.time), asString(item.source), relatedEvidence.join("\n")].join("\n");
   return {
     id,
     time: asString(item.time, "时间待核验"),
     description,
-    source: asString(item.source, relatedEvidence[0] ?? evidence[0]?.id ?? "runtime-discovery"),
+    source,
     relatedEvidence,
     relatedSuspects: resolveSuspectIds(item.relatedSuspects, caseData, suspectText),
     confidence: oneOf(item.confidence, ["confirmed", "suspected", "disputed"] as const, "suspected"),
   };
 }
 
+function timelineFingerprint(event: Pick<TimelineEvent, "time" | "description">) {
+  return `${normalizeTextForMatch(event.time)}|${normalizeTextForMatch(event.description)}`;
+}
+
 function normalizeRelationship(raw: unknown, evidence: Evidence[], caseData: CaseData, existing: Set<string>): Relationship {
   const item = asRecord(raw);
   const label = asString(item.label, "新关系线索");
   const id = idWithPrefix("relationship", item.id, label, existing);
-  const from = resolveSuspectIds([asString(item.from)], caseData, label)[0] ?? asString(item.from, "unknown");
-  const to = resolveSuspectIds([asString(item.to)], caseData, label)[0] ?? asString(item.to, "unknown");
+  const rawFrom = asString(item.from);
+  const rawTo = asString(item.to);
+  const mentionedPeople = resolvePersonIds([], caseData, label);
+  let from = resolvePersonIds([rawFrom], caseData, rawFrom || label)[0] ?? rawFrom;
+  let to = resolvePersonIds([rawTo], caseData, rawTo || label)[0] ?? rawTo;
+  if (!from || !to || from === to) {
+    from = mentionedPeople[0] ?? from;
+    to = mentionedPeople.find((personId) => personId !== from) ?? to;
+  }
+  const evidenceIds = new Set([...caseData.evidence, ...evidence].map((item) => item.id));
+  const relatedEvidence = asStringArray(item.relatedEvidence).filter((evidenceId) => evidenceIds.has(evidenceId));
   return {
     id,
     from,
@@ -635,7 +711,7 @@ function normalizeRelationship(raw: unknown, evidence: Evidence[], caseData: Cas
     type: oneOf(item.type, ["normal", "conflict", "hidden", "time", "evidence", "misleading"] as const, "evidence"),
     status: oneOf(item.status, ["unknown", "suspected", "conflict", "confirmed", "excluded", "key"] as const, "suspected"),
     label,
-    relatedEvidence: asStringArray(item.relatedEvidence).length ? asStringArray(item.relatedEvidence) : evidence.map((item) => item.id),
+    relatedEvidence,
   };
 }
 
@@ -683,8 +759,67 @@ function relatedLocationsFromText(text: string, caseData: CaseData, state: Playe
 }
 
 function firstTimeText(text: string) {
-  const match = text.match(/(?:凌晨|上午|中午|下午|晚上|昨晚|当晚|夜里)?\s*\d{1,2}(?:[:：点时]\d{1,2})?(?:分)?/);
-  return match?.[0]?.replace(/\s+/g, "") ?? "";
+  const compact = text.replace(/\s+/g, "");
+  const dateMatch = compact.match(
+    /(?:\d{4}[年/-])?\d{1,2}(?:月|[-/.])\d{1,2}(?:日|号)?(?:(?:凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜里|夜间|深夜)?\d{1,2}(?::|：)\d{1,2}|(?:凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜里|夜间|深夜)?\d{1,2}(?:点半|点(?:[0-5]?\d分?)?|时(?:[0-5]?\d分?)?))?/,
+  );
+  if (dateMatch?.[0]) return dateMatch[0];
+
+  const relativeMatch = compact.match(
+    /(?:(?:案发|事发)?(?:前两天|前一天|前一晚|前夜)|前天|昨天|昨晚|昨日|当天|当晚|当夜|次日|翌日|第二天|第二日)(?:(?:凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜里|夜间|深夜)?\d{1,2}(?::|：)\d{1,2}|(?:凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜里|夜间|深夜)?\d{1,2}(?:点半|点(?:[0-5]?\d分?)?|时(?:[0-5]?\d分?)?))?/,
+  );
+  if (relativeMatch?.[0]) return relativeMatch[0];
+
+  const clockMatch =
+    compact.match(/(?:凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜里|夜间|深夜|昨晚|当晚|当夜)?\d{1,2}(?::|：)\d{1,2}/) ??
+    compact.match(/(?:凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜里|夜间|深夜|昨晚|当晚|当夜)\d{1,2}(?:点半|点(?:[0-5]?\d分?)?|时(?:[0-5]?\d分?)?)?/);
+
+  return clockMatch?.[0] ?? "";
+}
+
+function firstTimelineAnchor(text: string) {
+  const explicitTime = firstTimeText(text);
+  if (explicitTime) return explicitTime;
+
+  const compact = text.replace(/\s+/g, "");
+  const orderMatch = compact.match(
+    /(?:报警|报案|重启|断电|停电|补录|交接|进入|离开|到达|返回|通话|登记|刷卡|签名|争吵|见面|停留)(?:前|后)|(?:之前|之后|随后|接着|紧接着|同时|同一时段|期间)/,
+  );
+  return orderMatch?.[0] ?? "";
+}
+
+function asksForTimeline(input: string) {
+  return /时间线|时间轴|轨迹|整理经过|经过|先后|顺序|几点|什么时候|出入|进出/.test(input);
+}
+
+function hasTimelineEventSignal(text: string) {
+  return /记录显示|记录里|画面|镜头|录像|监控|日志|门禁|刷卡|登记|通行|出入|进出|进入|离开|到达|返回|停留|交接|拿走|放回|重启|断电|停电|报警|报案|补录|签名|通话|来电|拨号|聊天|消息|账册|账页|票据|定位|轨迹|口供|证词|承认|争吵|见面|共同出现|同时出现/.test(text);
+}
+
+function shouldCreateFallbackTimeline(input: string, reply: string, createEvidence: boolean) {
+  const text = `${input}\n${reply}`;
+  if (!firstTimelineAnchor(text)) return false;
+
+  const timelineRequest = asksForTimeline(input);
+  const eventSignal = hasTimelineEventSignal(text);
+  const conversationalOnly =
+    /总结|整理|复盘|怎么看|怎么想|下一步|建议|分析|推理|怀疑|方向/.test(input) &&
+    !timelineRequest &&
+    !eventSignal;
+
+  return !conversationalOnly && (createEvidence || timelineRequest || eventSignal);
+}
+
+function timelineDescriptionFromText(reply: string, input: string, anchor: string, fallback: string) {
+  const parts = `${reply}\n${input}`
+    .split(/[。！？；;\n]/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const normalizedAnchor = normalizeTextForMatch(anchor);
+  const anchored = parts.find((line) => normalizeTextForMatch(line).includes(normalizedAnchor));
+  const eventful = parts.find((line) => hasTimelineEventSignal(line));
+  const description = anchored || eventful || parts[0] || fallback;
+  return description.length > 120 ? `${description.slice(0, 117)}...` : description;
 }
 
 export function createFallbackRuntimeDiscoveryFromReply({
@@ -701,8 +836,11 @@ export function createFallbackRuntimeDiscoveryFromReply({
   const stamp = Date.now().toString(36);
   const evidenceId = `evidence-runtime-${stamp}`;
   const title = input.length > 18 ? `调查记录：${input.slice(0, 18)}...` : `调查记录：${input}`;
-  const time = firstTimeText(reply);
+  const evidenceTime = firstTimeText(reply);
+  const timelineTime = firstTimelineAnchor(`${input}\n${reply}`);
   const createEvidence = shouldCreateFallbackEvidence(input, reply);
+  const createTimeline = shouldCreateFallbackTimeline(input, reply, createEvidence);
+  const timelineDescription = timelineTime ? timelineDescriptionFromText(reply, input, timelineTime, title) : "";
   const fallbackEvidenceType = evidenceTypeFromText(`${input}\n${reply}`);
   const fallbackLocation = caseData.locations.find((location) => location.id === state.currentLocation)?.name;
   const fallbackDetails = reply.split(/[。！？\n]/).map((line) => line.trim()).filter(Boolean).slice(0, 4);
@@ -721,7 +859,7 @@ export function createFallbackRuntimeDiscoveryFromReply({
               visualSubject: title,
               visualCarrier: visualCarrierForEvidenceType(fallbackEvidenceType),
               visibleDetails: fallbackDetails,
-              ...(time ? { timeWindow: time } : {}),
+              ...(evidenceTime || timelineTime ? { timeWindow: evidenceTime || timelineTime } : {}),
               ...(fallbackLocation ? { locationCue: fallbackLocation } : {}),
               ...(reply.match(/异常|空档|补录|不一致|缺失|断电|重启|改动|可疑/) ? { abnormalPoint: reply } : {}),
             },
@@ -736,14 +874,14 @@ export function createFallbackRuntimeDiscoveryFromReply({
           },
         ]
       : [],
-    timeline: createEvidence && time
+    timeline: createTimeline && timelineTime
       ? [
           {
             id: `timeline-runtime-${stamp}`,
-            time,
-            description: reply.split(/[。！？\n]/).find((line) => line.includes(time))?.trim() || title,
-            source: evidenceId,
-            relatedEvidence: [evidenceId],
+            time: timelineTime,
+            description: timelineDescription || title,
+            source: createEvidence ? evidenceId : "runtime-discovery",
+            relatedEvidence: createEvidence ? [evidenceId] : [],
             relatedSuspects: relatedSuspectsFromText(reply, caseData),
             confidence: "suspected",
           },
@@ -752,6 +890,8 @@ export function createFallbackRuntimeDiscoveryFromReply({
     notes: [
       createEvidence
         ? `${title} 已临时归档，等待精细结构化。`
+        : createTimeline
+          ? `时间线节点已临时归档：${timelineDescription || timelineTime}`
         : `未形成独立证据：${reply.split(/[。！？\n]/).find((line) => line.trim())?.trim() || input}`,
     ],
   };
@@ -789,8 +929,19 @@ function buildRuntimeDiscoveryFromDiscoveries({
   const addedSuspects = discoveries.suspects
     .filter((item) => !resolveExistingSuspectFromRecord(item, caseData))
     .map((item) => normalizeSuspect(item, suspectIds));
-  const addedTimeline = discoveries.timeline.map((item) => normalizeTimeline(item, addedEvidence, caseData, timelineIds));
-  const addedRelationships = discoveries.relationships.map((item) => normalizeRelationship(item, addedEvidence, caseData, relationshipIds));
+  const existingTimelineFingerprints = new Set([...caseData.timeline, ...state.playerTimeline].map(timelineFingerprint));
+  const addedTimeline = discoveries.timeline
+    .map((item) => normalizeTimeline(item, addedEvidence, caseData, timelineIds))
+    .filter((event) => {
+      const fingerprint = timelineFingerprint(event);
+      if (existingTimelineFingerprints.has(fingerprint)) return false;
+      existingTimelineFingerprints.add(fingerprint);
+      return true;
+    });
+  const knownPersonIds = new Set([...personRelationshipIds(caseData), ...addedSuspects.map((suspect) => suspect.id)]);
+  const addedRelationships = discoveries.relationships
+    .map((item) => normalizeRelationship(item, addedEvidence, caseData, relationshipIds))
+    .filter((relationship) => knownPersonIds.has(relationship.from) && knownPersonIds.has(relationship.to) && relationship.from !== relationship.to);
   const nextSuspectIds = new Set([...caseData.suspects.map((item) => item.id), ...addedSuspects.map((item) => item.id)]);
   const relatedSuspectIds = [
     ...existingSuspectIdsFromDiscoveries,

@@ -414,6 +414,60 @@ function visualTemplateDirection(template: string) {
   return `Template cue: ${template}`;
 }
 
+function clueObjectVisualDirections(
+  location: CaseData["locations"][number],
+  object: CaseData["locations"][number]["objects"][number],
+) {
+  const text = `${object.name}\n${object.description}\n${location.name}\n${location.description}`;
+  const directions = [
+    "Create ONE clue-entry image, not a generic atmosphere shot.",
+    "The exact object must fill most of the frame, with a clear inspectable area that invites a follow-up question.",
+    "Encode one or two non-conclusive visual anomalies from the object description. They should be noticeable, but they must not solve the case by themselves.",
+  ];
+
+  if (/监控|录像|画面|摄像|控制台|缺帧/.test(text)) {
+    directions.push(
+      "If this is CCTV-related, show a DVR monitor or control console close-up with camera tiles, timestamp strip, a highlighted/redacted missing-frame block, or one suspicious frozen thumbnail. Do not show the culprit clearly.",
+    );
+  }
+
+  if (/门禁|门岗|登记|终端|刷卡|进出|放行|系统/.test(text)) {
+    directions.push(
+      "If this is access-log-related, show a guard terminal or card-reader log screen with table rows, time columns, status chips, and one circled or highlighted abnormal row. Text should be redacted or unreadable.",
+    );
+  }
+
+  if (/账册|账本|流水|票据|合同|收据|货单|结算|发票|单据/.test(text)) {
+    directions.push(
+      "If this is document or ledger related, show a close-up page with ruled columns, page tabs, folded corners, moisture marks, circled line items, or redacted number blocks.",
+    );
+  }
+
+  if (/电话|座机|通话|手机|聊天|消息/.test(text)) {
+    directions.push(
+      "If this is call or message related, show the device or printed record with a small highlighted call/message row, duration/time blocks, and redacted identity text.",
+    );
+  }
+
+  if (/门|锁|钥匙|封条|柜|箱|样本|药箱|物件|工具|缺口|空槽/.test(text)) {
+    directions.push(
+      "If this is a physical clue object, show material detail: scratches, lifted seal edges, missing slots, damp marks, scuffs, labels, or a scale marker when supported by the description.",
+    );
+  }
+
+  if (/水印|脚印|潮|冷凝|湿|划痕|痕迹|污渍/.test(text)) {
+    directions.push(
+      "If this is trace-related, make the trace inspectable with oblique light, a ruler/marker, directional marks, condensation, or a close surface texture.",
+    );
+  }
+
+  directions.push(
+    "Keep all text blocks unreadable or redacted. Use visual structure, highlighted rows, marks, gaps, and material details instead of legible exposition.",
+  );
+
+  return directions;
+}
+
 function planCaseAssets(caseData: CaseData, style: CaseVisualStyle): PlannedAsset[] {
   const firstLocation = caseData.locations[0];
   const coverAsset: PlannedAsset = {
@@ -498,6 +552,7 @@ function planCaseAssets(caseData: CaseData, style: CaseVisualStyle): PlannedAsse
     });
 
     for (const object of location.objects) {
+      const objectDirections = clueObjectVisualDirections(location, object);
       assets.push({
         kind: "clue_object",
         entityId: object.id,
@@ -514,9 +569,18 @@ function planCaseAssets(caseData: CaseData, style: CaseVisualStyle): PlannedAsse
         prompt: [
           style.consistencyPrompt,
           style.spoilerGuard,
-          `Close investigative object photo: ${object.name}.`,
-          `Object description: ${object.description}`,
-          "Evidence-table photography, observable material only, no readable spoiler text, 4:3.",
+          "",
+          `Clue object: ${object.name}.`,
+          `Location: ${location.name}. ${location.description}`,
+          `Object description with player-visible cues: ${object.description}`,
+          "",
+          "Required visual translation:",
+          ...objectDirections,
+          "",
+          "Composition: close investigative evidence-table or control-screen photograph, 4:3, pale case-file UI style, restrained documentary realism, muted teal/brass accents.",
+          "Do NOT show a generic warehouse corner, generic folder, decorative detective board, unrelated suspect portrait, or poster-like scene.",
+          "Do NOT reveal the culprit or exact hidden mechanism. Show only observable clues that make the player want to inspect this object.",
+          "No readable spoiler text, no title lettering, no watermark, no logos.",
         ].join("\n"),
       });
     }

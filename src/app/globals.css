@@ -36,6 +36,17 @@ body {
   font-family: Aptos, "Segoe UI", sans-serif;
 }
 
+.td-case-shell {
+  background:
+    linear-gradient(90deg, rgba(22, 60, 58, 0.16), transparent 9rem),
+    linear-gradient(180deg, rgba(255, 253, 247, 0.62), rgba(244, 239, 229, 0.2)),
+    #f4efe5;
+  box-shadow:
+    0 24px 80px rgba(49, 40, 28, 0.18),
+    inset 0 1px 0 rgba(255, 253, 247, 0.72);
+  isolation: isolate;
+}
+
 .td-scrollbar {
   scrollbar-color: rgba(111, 213, 199, 0.35) rgba(255, 255, 255, 0.05);
   scrollbar-width: thin;

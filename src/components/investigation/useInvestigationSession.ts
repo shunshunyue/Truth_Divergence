@@ -20,6 +20,9 @@ import {
 } from "@/components/investigation/types";
 import type { CaseVisualManifest, VisualAsset } from "@/game/schemas/visuals";
 
+const persistedInvestigationKey = "td-investigation-save-v1";
+const legacySessionKey = "td-session";
+
 const simulatedBootTimeline: Array<{ step: BootStepId; progress: number; status: string; delay: number }> = [
   { step: "core", progress: 18, status: "缓存命中，正在核对案件核心...", delay: 180 },
   { step: "scene", progress: 34, status: "正在装配初始现场和可调查区域...", delay: 360 },
@@ -29,6 +32,123 @@ const simulatedBootTimeline: Array<{ step: BootStepId; progress: number; status:
   { step: "chat", progress: 96, status: "正在接通案件问答中枢...", delay: 1320 },
   { step: "chat", progress: 100, status: "案件领取完毕。", delay: 1640 },
 ];
+
+type PersistedInvestigationSnapshot = {
+  version: 1;
+  roomId: string;
+  session: SessionPayload;
+  chatMessages: InvestigationChatMessage[];
+  chatMode: ChatModeState;
+  actionStatus: string;
+  showBriefing: boolean;
+  visualFocus: VisualFocusState;
+  savedAt: number;
+};
+
+function createRoomId() {
+  return `room-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
+function hasBrowserStorage() {
+  return typeof window !== "undefined" && Boolean(window.localStorage);
+}
+
+function isSessionPayload(value: unknown): value is SessionPayload {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SessionPayload>;
+  return (
+    typeof candidate.sessionId === "string" &&
+    Boolean(candidate.sessionId) &&
+    Boolean(candidate.caseData) &&
+    Boolean(candidate.state)
+  );
+}
+
+function isChatMode(value: unknown): value is ChatModeState {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ChatModeState>;
+  return candidate.mode === "assistant" || candidate.mode === "interrogation";
+}
+
+function reviveChatMessages(value: unknown): InvestigationChatMessage[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((message): message is InvestigationChatMessage => {
+      if (!message || typeof message !== "object") return false;
+      const candidate = message as Partial<InvestigationChatMessage>;
+      return typeof candidate.id === "string" && typeof candidate.turnId === "string" && typeof candidate.text === "string";
+    })
+    .slice(-80)
+    .map((message) => {
+      if (!message.pending && !message.clientPending) return message;
+      return {
+        ...message,
+        text: message.placeholder ? "刷新前的回复没有完整同步，可以重新追问这一条。" : message.text,
+        pending: false,
+        placeholder: false,
+        clientPending: false,
+      };
+    });
+}
+
+function loadPersistedInvestigation(): PersistedInvestigationSnapshot | null {
+  if (!hasBrowserStorage()) return null;
+
+  try {
+    const raw = window.localStorage.getItem(persistedInvestigationKey);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PersistedInvestigationSnapshot>;
+      if (parsed.version === 1 && typeof parsed.roomId === "string" && isSessionPayload(parsed.session)) {
+        return {
+          version: 1,
+          roomId: parsed.roomId || createRoomId(),
+          session: parsed.session,
+          chatMessages: reviveChatMessages(parsed.chatMessages),
+          chatMode: isChatMode(parsed.chatMode) ? parsed.chatMode : { mode: "assistant", label: "案件 AI 助手" },
+          actionStatus: typeof parsed.actionStatus === "string" ? parsed.actionStatus : "案件进度已恢复。",
+          showBriefing: Boolean(parsed.showBriefing),
+          visualFocus: parsed.visualFocus ?? null,
+          savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : Date.now(),
+        };
+      }
+    }
+
+    const legacyRaw = window.localStorage.getItem(legacySessionKey);
+    if (legacyRaw) {
+      const legacySession = JSON.parse(legacyRaw) as unknown;
+      if (isSessionPayload(legacySession)) {
+        return {
+          version: 1,
+          roomId: createRoomId(),
+          session: legacySession,
+          chatMessages: [],
+          chatMode: { mode: "assistant", label: "案件 AI 助手" },
+          actionStatus: "已恢复旧版案件进度。",
+          showBriefing: false,
+          visualFocus: null,
+          savedAt: Date.now(),
+        };
+      }
+    }
+  } catch {
+    window.localStorage.removeItem(persistedInvestigationKey);
+  }
+
+  return null;
+}
+
+function persistInvestigationSnapshot(snapshot: PersistedInvestigationSnapshot) {
+  if (!hasBrowserStorage()) return;
+  window.localStorage.setItem(persistedInvestigationKey, JSON.stringify(snapshot));
+  window.localStorage.removeItem(legacySessionKey);
+}
+
+function clearPersistedInvestigation() {
+  if (!hasBrowserStorage()) return;
+  window.localStorage.removeItem(persistedInvestigationKey);
+  window.localStorage.removeItem(legacySessionKey);
+}
 
 function stepFromStatus(text: string): BootStepId {
   if (text.includes("对话") || text.includes("问答") || text.includes("聊天")) return "chat";
@@ -153,16 +273,18 @@ function mergeStatePatch(current: PlayerCaseState, patch: AgentPlayerStatePatch)
 }
 
 export function useInvestigationSession() {
+  const defaultChatMode: ChatModeState = { mode: "assistant", label: "案件 AI 助手" };
   const socketRef = useRef<ReturnType<typeof connectAgentSocket> | null>(null);
   const sessionRef = useRef<SessionPayload | null>(null);
   const pendingSessionRef = useRef<SessionPayload | null>(null);
   const bootTimersRef = useRef<number[]>([]);
   const startSentRef = useRef(false);
   const seenEventIdsRef = useRef<Set<string>>(new Set());
-  const roomIdRef = useRef(`room-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`);
+  const roomIdRef = useRef(createRoomId());
+  const [storageReady, setStorageReady] = useState(false);
   const [session, setSession] = useState<SessionPayload | null>(null);
   const [socketReady, setSocketReady] = useState(false);
-  const [bootStatus, setBootStatus] = useState("正在连接案件缓存池...");
+  const [bootStatus, setBootStatus] = useState("正在读取本地案件进度...");
   const [bootProgress, setBootProgress] = useState(8);
   const [activeBootStep, setActiveBootStep] = useState<BootStepId>("core");
   const [bootError, setBootError] = useState("");
@@ -170,12 +292,37 @@ export function useInvestigationSession() {
   const [showBriefing, setShowBriefing] = useState(false);
   const [isActing, setIsActing] = useState(false);
   const [actionStatus, setActionStatus] = useState("等待调查指令。");
-  const [chatMode, setChatMode] = useState<ChatModeState>({ mode: "assistant", label: "案件 AI 助手" });
+  const [chatMode, setChatMode] = useState<ChatModeState>(defaultChatMode);
   const [chatMessages, setChatMessages] = useState<InvestigationChatMessage[]>([]);
   const [completedVisualAsset, setCompletedVisualAsset] = useState<VisualAsset | null>(null);
   const [visualFocus, setVisualFocus] = useState<VisualFocusState>(null);
 
   useEffect(() => {
+    const snapshot = loadPersistedInvestigation();
+
+    if (snapshot) {
+      roomIdRef.current = snapshot.roomId || roomIdRef.current;
+      sessionRef.current = snapshot.session;
+      setSession(snapshot.session);
+      setChatMessages(snapshot.chatMessages);
+      setChatMode(snapshot.chatMode);
+      setActionStatus(snapshot.actionStatus);
+      setShowBriefing(snapshot.showBriefing);
+      setVisualFocus(snapshot.visualFocus);
+      setActiveBootStep("chat");
+      setBootProgress(100);
+      setBootStatus("已恢复本地案件进度，正在重连调查中枢...");
+      setBootReleased(true);
+    } else {
+      setBootStatus("正在连接案件缓存池...");
+    }
+
+    setStorageReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+
     let cancelled = false;
     let deltaCount = 0;
 
@@ -433,7 +580,16 @@ export function useInvestigationSession() {
       }
 
       if (event === "session.ready") {
-        playCachedBootSequence(envelope.payload);
+        if (sessionRef.current || bootReleased) {
+          clearBootTimers();
+          setActiveBootStep("chat");
+          setBootProgress(100);
+          setBootStatus(envelope.payload.resultText ?? "案件进度已恢复。");
+          setBootReleased(true);
+          commitSession(envelope.payload);
+        } else {
+          playCachedBootSequence(envelope.payload);
+        }
       }
 
       if (event === "game.action.result") {
@@ -524,15 +680,28 @@ export function useInvestigationSession() {
       socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, []);
+  }, [storageReady]);
 
   useEffect(() => {
-    if (!socketReady || startSentRef.current || sessionRef.current) return;
+    if (!storageReady || !socketReady || startSentRef.current) return;
 
     try {
       const activeSocket = socketRef.current;
       if (!activeSocket?.isOpen()) {
         throw new Error("Investigation Agent WebSocket 尚未准备好。");
+      }
+
+      const restoredSession = sessionRef.current;
+      if (restoredSession) {
+        setActionStatus("案件进度已恢复，正在重连调查中枢...");
+        setBootStatus("已恢复本地案件，正在同步服务器状态...");
+        activeSocket.send({
+          type: "session.resume",
+          roomId: roomIdRef.current,
+          sessionId: restoredSession.sessionId,
+        });
+        startSentRef.current = true;
+        return;
       }
 
       setBootStatus("Investigation Agent 已连接，正在领取案件...");
@@ -546,13 +715,27 @@ export function useInvestigationSession() {
       setBootError(message);
       setActionStatus(message);
     }
-  }, [socketReady]);
+  }, [socketReady, storageReady]);
 
   useEffect(() => {
     sessionRef.current = session;
-    if (!session) return;
-    window.localStorage.setItem("td-session", JSON.stringify(session));
   }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    persistInvestigationSnapshot({
+      version: 1,
+      roomId: roomIdRef.current,
+      session,
+      chatMessages: reviveChatMessages(chatMessages),
+      chatMode,
+      actionStatus,
+      showBriefing,
+      visualFocus,
+      savedAt: Date.now(),
+    });
+  }, [actionStatus, chatMessages, chatMode, session, showBriefing, visualFocus]);
 
   const data = useMemo(() => {
     if (!session) return null;
@@ -613,6 +796,21 @@ export function useInvestigationSession() {
     }
   }
 
+  function discardSession() {
+    clearPersistedInvestigation();
+    pendingSessionRef.current = null;
+    sessionRef.current = null;
+    startSentRef.current = true;
+    socketRef.current?.close();
+    setSession(null);
+    setChatMessages([]);
+    setCompletedVisualAsset(null);
+    setVisualFocus(null);
+    setShowBriefing(false);
+    setBootReleased(false);
+    setActionStatus("案件已退出。");
+  }
+
   return {
     actionStatus,
     activeBootStep,
@@ -629,6 +827,7 @@ export function useInvestigationSession() {
     chatMode,
     completedVisualAsset,
     dismissVisualNotice: () => setCompletedVisualAsset(null),
+    discardSession,
     visualFocus,
     submitCommand,
   };

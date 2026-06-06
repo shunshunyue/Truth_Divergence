@@ -8,10 +8,12 @@ import {
   Fingerprint,
   GitBranch,
   ImageIcon,
+  LogOut,
   MapPin,
   Maximize2,
   Search,
   Send,
+  ShieldCheck,
   UserRound,
   X,
 } from "lucide-react";
@@ -27,6 +29,7 @@ import {
   type VisualFocusState,
 } from "@/components/investigation/types";
 import { findVisualAsset, visualUrl } from "@/components/investigation/visualAssets";
+import { sortTimelineEvents } from "@/game/engine/timelineSort";
 import type { CaseVisualManifest, VisualAsset } from "@/game/schemas/visuals";
 import type { CaseData, PlayerCaseState, SuspectState } from "@/game/schemas/game";
 
@@ -463,81 +466,154 @@ export function VisualReadyModal({
       onClick={onClose}
     >
       <motion.div
-        className="w-full max-w-3xl overflow-hidden rounded-lg border border-[#cfa65b] bg-[#fffdf7] shadow-[0_26px_90px_rgba(31,25,17,0.32)]"
+        className="grid max-h-[calc(100dvh-2rem)] w-full max-w-4xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-[#cfa65b] bg-[#fffdf7] shadow-[0_26px_90px_rgba(31,25,17,0.32)] md:grid-cols-[minmax(0,1fr)_20rem] md:grid-rows-none"
+        style={{ height: "min(44rem, calc(100dvh - 2rem))" }}
         initial={{ opacity: 0, y: 16, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 10, scale: 0.985 }}
         transition={{ duration: 0.22, ease: "easeOut" }}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
-        <div className="grid md:grid-cols-[minmax(0,1fr)_17rem]">
-          <div className="relative min-h-72 bg-[#efe8d8]">
-            {imageUrl ? (
-              <img alt="" className="h-full max-h-[72vh] w-full object-contain" src={imageUrl} />
-            ) : (
-              <div className="h-full w-full bg-[linear-gradient(135deg,rgba(36,97,91,0.18),transparent_45%,rgba(157,109,33,0.18))]" />
-            )}
-            <motion.span
-              className="td-stamp absolute left-5 top-5 rotate-[-7deg] border-[#9d6d21] bg-[#fffdf7]/82 px-3 py-1 text-[#9d6d21]"
-              initial={{ opacity: 0, scale: 1.35, rotate: -15 }}
-              animate={{ opacity: 0.9, scale: 1, rotate: -7 }}
-              transition={{ delay: 0.12, duration: 0.24 }}
-            >
-              archived
-            </motion.span>
+        <div className="relative h-[min(42vh,22rem)] min-h-0 bg-[#efe8d8] md:h-auto">
+          {imageUrl ? (
+            <img alt="" className="h-full w-full object-contain" src={imageUrl} />
+          ) : (
+            <div className="h-full w-full bg-[linear-gradient(135deg,rgba(36,97,91,0.18),transparent_45%,rgba(157,109,33,0.18))]" />
+          )}
+          <motion.span
+            className="td-stamp absolute left-5 top-5 rotate-[-7deg] border-[#9d6d21] bg-[#fffdf7]/82 px-3 py-1 text-[#9d6d21]"
+            initial={{ opacity: 0, scale: 1.35, rotate: -15 }}
+            animate={{ opacity: 0.9, scale: 1, rotate: -7 }}
+            transition={{ delay: 0.12, duration: 0.24 }}
+          >
+            archived
+          </motion.span>
+        </div>
+        <aside className="td-scrollbar flex min-h-0 flex-col overflow-y-auto border-t border-[#d8cfba] p-5 md:border-l md:border-t-0">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-[#24615b]">新影像入档</p>
+              <h3 className="mt-2 text-lg font-black leading-tight text-[#27241f]">{asset.title}</h3>
+            </div>
+            <button className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#8b8171] hover:bg-[#f4efe5] hover:text-[#9d6d21]" onClick={onClose} type="button">
+              <X size={15} />
+            </button>
           </div>
-          <aside className="flex flex-col border-t border-[#d8cfba] p-5 md:border-l md:border-t-0">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-[#24615b]">新影像入档</p>
-                <h3 className="mt-2 text-lg font-black leading-tight text-[#27241f]">{asset.title}</h3>
+          <p className="text-sm leading-6 text-[#5f564a]">
+            {asset.caption || asset.description || "后台整理完成，影像已经同步到左侧索引。"}
+          </p>
+          {plotClues.length > 0 && (
+            <div className="mt-4 border border-[#d8cfba] bg-[#f8f3e8] p-3">
+              <p className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-[#9d6d21]">图上可追点</p>
+              <div className="mt-2 grid gap-1.5">
+                {plotClues.map((clue) => (
+                  <p key={clue} className="border-l-2 border-[#cfa65b] pl-2 text-xs leading-5 text-[#3d352b]">
+                    {clue}
+                  </p>
+                ))}
               </div>
-              <button className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#8b8171] hover:bg-[#f4efe5] hover:text-[#9d6d21]" onClick={onClose} type="button">
-                <X size={15} />
-              </button>
             </div>
-            <p className="text-sm leading-6 text-[#5f564a]">
-              {asset.caption || asset.description || "后台整理完成，影像已经同步到左侧索引。"}
-            </p>
-            {plotClues.length > 0 && (
-              <div className="mt-4 border border-[#d8cfba] bg-[#f8f3e8] p-3">
-                <p className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-[#9d6d21]">图上可追点</p>
-                <div className="mt-2 grid gap-1.5">
-                  {plotClues.map((clue) => (
-                    <p key={clue} className="border-l-2 border-[#cfa65b] pl-2 text-xs leading-5 text-[#3d352b]">
-                      {clue}
-                    </p>
-                  ))}
-                </div>
+          )}
+          <div className="mt-auto flex flex-col gap-2 pt-5">
+            {prompts.length > 0 && onPrompt && (
+              <div className="flex flex-wrap gap-1.5">
+                {prompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    className="inline-flex items-center gap-1 rounded-sm border border-[#b8d8d2] bg-[#e8f6f2] px-2 py-1 font-mono text-[0.58rem] text-[#24615b] hover:border-[#24615b]"
+                    onClick={() => {
+                      onPrompt(prompt);
+                      onClose();
+                    }}
+                    type="button"
+                  >
+                    <Search size={11} /> {shortText(prompt, 20)}
+                  </button>
+                ))}
               </div>
             )}
-            <div className="mt-auto flex flex-col gap-2 pt-5">
-              {prompts.length > 0 && onPrompt && (
-                <div className="flex flex-wrap gap-1.5">
-                  {prompts.map((prompt) => (
-                    <button
-                      key={prompt}
-                      className="inline-flex items-center gap-1 rounded-sm border border-[#b8d8d2] bg-[#e8f6f2] px-2 py-1 font-mono text-[0.58rem] text-[#24615b] hover:border-[#24615b]"
-                      onClick={() => {
-                        onPrompt(prompt);
-                        onClose();
-                      }}
-                      type="button"
-                    >
-                      <Search size={11} /> {shortText(prompt, 20)}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <button
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-[#143b37] bg-[#163c3a] px-3 font-mono text-xs font-bold text-[#eafffb] hover:bg-[#24615b]"
-                onClick={onClose}
-                type="button"
-              >
-                <ImageIcon size={13} /> 收入案卷
-              </button>
+            <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-[#143b37] bg-[#163c3a] px-3 font-mono text-xs font-bold text-[#eafffb] hover:bg-[#24615b]"
+              onClick={onClose}
+              type="button"
+            >
+              <ImageIcon size={13} /> 收入案卷
+            </button>
+          </div>
+        </aside>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+export function ExitCaseConfirmModal({
+  caseTitle,
+  reason,
+  onCancel,
+  onConfirm,
+}: {
+  caseTitle: string;
+  reason: "manual" | "solved";
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const isSolved = reason === "solved";
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[70] grid place-items-center bg-[#27241f]/42 p-4 backdrop-blur"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onCancel}
+    >
+      <motion.div
+        className="w-full max-w-md overflow-hidden rounded-lg border border-[#cfa65b] bg-[#fffdf7] shadow-[0_28px_100px_rgba(31,25,17,0.34)]"
+        initial={{ opacity: 0, y: 16, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 10, scale: 0.985 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      >
+        <div className="border-b border-[#d8cfba] bg-[#fbf8f0] px-5 py-4">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-[#b8d8d2] bg-[#e8f6f2] text-[#24615b]">
+              {isSolved ? <ShieldCheck size={18} /> : <LogOut size={18} />}
+            </span>
+            <div className="min-w-0">
+              <p className="font-mono text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[#24615b]">
+                {isSolved ? "case closed" : "leave case"}
+              </p>
+              <h3 className="mt-1 text-lg font-black leading-tight text-[#27241f]">
+                {isSolved ? "确认退出已完成案件？" : "确认退出当前案件？"}
+              </h3>
             </div>
-          </aside>
+          </div>
+        </div>
+        <div className="px-5 py-4">
+          <p className="text-sm font-semibold leading-6 text-[#4f483d]">{caseTitle}</p>
+          <p className="mt-2 text-sm leading-6 text-[#6a6256]">
+            {isSolved
+              ? "确认后会清除这局案件的本地进度，并返回首页。"
+              : "未结案进度会被清除；取消后可以继续调查，刷新浏览器也会回到这局。"}
+          </p>
+        </div>
+        <div className="flex flex-col-reverse gap-2 border-t border-[#d8cfba] bg-[#fbf8f0] px-5 py-4 sm:flex-row sm:justify-end">
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-md border border-[#cfc4ad] bg-[#fffdf7] px-4 font-mono text-xs font-bold text-[#675d4f] transition hover:border-[#24615b] hover:text-[#24615b]"
+            onClick={onCancel}
+            type="button"
+          >
+            继续调查
+          </button>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#143b37] bg-[#163c3a] px-4 font-mono text-xs font-bold text-[#eafffb] transition hover:bg-[#24615b]"
+            onClick={onConfirm}
+            type="button"
+          >
+            <LogOut size={14} />
+            确认退出
+          </button>
         </div>
       </motion.div>
     </motion.div>
@@ -579,7 +655,7 @@ function VisualStage({
 
   return (
     <motion.div
-      className="mx-auto mb-5 grid max-w-3xl overflow-hidden rounded-lg border border-[#d8cfba] bg-[#fffdf7]/88 shadow-[0_18px_60px_rgba(49,40,28,0.14)] md:grid-cols-[11rem_1fr]"
+      className="mx-auto mb-5 grid w-full max-w-[56rem] overflow-hidden rounded-lg border border-[#d8cfba] bg-[#fffdf7]/88 shadow-[0_18px_60px_rgba(49,40,28,0.14)] md:grid-cols-[11rem_1fr]"
       layout
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
@@ -627,17 +703,31 @@ function findEntityVisual(data: InvestigationData, entityId: string) {
 }
 
 export function LeftDrawer({
+  actionStatus,
+  activeStep,
+  bootProgress,
   data,
   isActing,
   isBooting,
+  state,
   setInput,
+  visualFocus,
+  onOpenRelationship,
+  onOpenTimeline,
 }: {
+  actionStatus: string;
+  activeStep: BootStepId;
+  bootProgress: number;
   data: InvestigationData | null;
   isActing: boolean;
   isBooting: boolean;
+  state?: PlayerCaseState;
   setInput: (value: string) => void;
+  visualFocus: VisualFocusState;
+  onOpenRelationship: () => void;
+  onOpenTimeline: () => void;
 }) {
-  const [open, setOpen] = useState<"locations" | "clues" | "evidence" | null>(null);
+  const [open, setOpen] = useState<"dashboard" | "locations" | "clues" | "evidence" | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<InvestigationData["unlockedLocations"][number] | null>(null);
   const [selectedClue, setSelectedClue] = useState<InvestigationData["availableClues"][number] | null>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<InvestigationData["discoveredEvidence"][number] | null>(null);
@@ -645,57 +735,68 @@ export function LeftDrawer({
   const locationCount = data?.unlockedLocations.length ?? 0;
   const clueCount = data?.availableClues.length ?? 0;
   const evidenceCount = data?.discoveredEvidence.length ?? 0;
-  const drawerReady = !isBooting && data;
+  const drawerReady = open === "dashboard" || (!isBooting && data);
   const locationPulse = usePulseFlag(locationCount, 780);
   const cluePulse = usePulseFlag(clueCount, 780);
   const evidencePulse = usePulseFlag(evidenceCount, 920);
+  const statusPulse = usePulseFlag(state?.truthScore ?? bootProgress, 920);
+  const drawerWidthClass = open === "dashboard" ? "w-[25rem]" : "w-80";
+  const drawerOffset = open === "dashboard" ? -400 : -320;
 
   return (
-    <div className="relative flex h-full flex-col">
+    <div className="relative flex h-full flex-col bg-[#163c3a]">
       {/* Icon strip */}
-      <div className="flex w-12 flex-col items-center gap-1 border-r border-[#d8cfba] bg-[#ede8dc] pt-3">
-        {[
-          { section: "locations" as const, Icon: MapPin, count: locationCount, active: data?.currentLocation != null, pulse: locationPulse },
-          { section: "clues" as const, Icon: Search, count: clueCount, active: false, pulse: cluePulse },
-          { section: "evidence" as const, Icon: Fingerprint, count: evidenceCount, active: false, pulse: evidencePulse },
-        ].map(({ section, Icon, count, pulse }) => (
-          <motion.button
-            key={section}
-            className={[
-              "relative flex h-10 w-10 items-center justify-center transition",
-              pulse ? "td-divergence" : "",
-              open === section ? "text-[#24615b]" : "text-[#8b8171] hover:text-[#9d6d21]",
-            ].join(" ")}
-            animate={pulse ? { scale: [1, 1.22, 1], rotate: [0, -3, 2, 0] } : { scale: 1, rotate: 0 }}
-            transition={{ duration: 0.42, ease: "easeOut" }}
-            onClick={() => {
-              const next = open === section ? null : section;
-              setOpen(next);
-            }}
-            type="button"
-            aria-label={section}
-          >
-            <Icon size={18} />
-            {count > 0 && (
-              <motion.span
-                key={count}
-                className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center bg-[#24615b] px-0.5 font-mono text-[0.55rem] font-bold text-[#eafffb]"
-                initial={{ scale: 0.72, y: -2 }}
-                animate={{ scale: 1, y: 0 }}
-                transition={{ duration: 0.18 }}
-              >
-                {count}
-              </motion.span>
-            )}
-          </motion.button>
-        ))}
+      <div className="flex w-[3.25rem] flex-1 flex-col items-center border-r border-[#0f2b28] bg-[#163c3a] shadow-[inset_-1px_0_0_rgba(255,255,255,0.08)]">
+        <div className="grid h-14 w-full place-items-center border-b border-[#2f6760]">
+          <span className="font-display text-lg font-black leading-none text-[#eafffb]">N</span>
+        </div>
+        <div className="flex flex-1 flex-col items-center gap-1 pt-3">
+          {[
+            { section: "dashboard" as const, Icon: FileText, count: state?.truthScore ?? 0, active: Boolean(state), pulse: statusPulse },
+            { section: "locations" as const, Icon: MapPin, count: locationCount, active: data?.currentLocation != null, pulse: locationPulse },
+            { section: "clues" as const, Icon: Search, count: clueCount, active: false, pulse: cluePulse },
+            { section: "evidence" as const, Icon: Fingerprint, count: evidenceCount, active: false, pulse: evidencePulse },
+          ].map(({ section, Icon, count, pulse }) => (
+            <motion.button
+              key={section}
+              className={[
+                "relative flex h-10 w-10 items-center justify-center rounded-md transition",
+                pulse ? "td-divergence" : "",
+                open === section
+                  ? "bg-[#eafffb]/12 text-[#eafffb] shadow-[inset_0_0_0_1px_rgba(234,255,251,0.16)]"
+                  : "text-[#c4d6d0] hover:bg-[#eafffb]/8 hover:text-[#eafffb]",
+              ].join(" ")}
+              animate={pulse ? { scale: [1, 1.22, 1], rotate: [0, -3, 2, 0] } : { scale: 1, rotate: 0 }}
+              transition={{ duration: 0.42, ease: "easeOut" }}
+              onClick={() => {
+                const next = open === section ? null : section;
+                setOpen(next);
+              }}
+              type="button"
+              aria-label={section}
+            >
+              <Icon size={18} />
+              {count > 0 && section !== "dashboard" && (
+                <motion.span
+                  key={count}
+                  className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-sm bg-[#e7f05f] px-0.5 font-mono text-[0.55rem] font-black text-[#163c3a]"
+                  initial={{ scale: 0.72, y: -2 }}
+                  animate={{ scale: 1, y: 0 }}
+                  transition={{ duration: 0.18 }}
+                >
+                  {count}
+                </motion.span>
+              )}
+            </motion.button>
+          ))}
+        </div>
       </div>
 
       {/* Overlay drawer */}
       <AnimatePresence>
         {open && drawerReady && (
           <motion.div
-            className="fixed inset-0 z-10"
+            className="fixed inset-0 z-30 bg-[#27241f]/[0.02]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -707,17 +808,22 @@ export function LeftDrawer({
       <AnimatePresence>
         {open && drawerReady && (
           <motion.aside
-            className="absolute left-12 top-0 z-20 flex h-full w-72 flex-col border-r border-t-2 border-r-[#d8cfba] border-t-[#24615b] bg-[#ede8dc]"
+            className={[
+              "absolute left-[3.25rem] top-0 z-40 flex h-full flex-col border-r border-[#bfb39d] bg-[#f8f3e8] shadow-[18px_0_54px_rgba(49,40,28,0.18)]",
+              drawerWidthClass,
+            ].join(" ")}
             style={{ willChange: "transform" }}
-            initial={{ x: -288 }}
+            initial={{ x: drawerOffset }}
             animate={{ x: 0 }}
-            exit={{ x: -288 }}
+            exit={{ x: drawerOffset }}
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
             onKeyDown={(e) => e.key === "Escape" && setOpen(null)}
           >
-            <div className="flex items-center justify-between border-b border-[#d8cfba] px-4 py-3">
-              <span className="font-mono text-xs text-[#24615b]">
-                {open === "locations"
+            <div className="flex h-14 shrink-0 items-center justify-between border-b border-[#d8cfba] bg-[#fffdf7] px-4">
+              <span className="font-mono text-xs font-bold text-[#174844]">
+                {open === "dashboard"
+                  ? "案件图表"
+                  : open === "locations"
                   ? "可前往地点"
                   : open === "clues"
                     ? "场景线索"
@@ -732,7 +838,27 @@ export function LeftDrawer({
               </button>
             </div>
 
-            <div className="td-scrollbar flex-1 overflow-y-auto p-3">
+            <div className="td-scrollbar flex-1 overflow-y-auto p-4 pb-28">
+              {open === "dashboard" && (
+                <CaseChartPanel
+                  actionStatus={actionStatus}
+                  activeStep={activeStep}
+                  bootProgress={bootProgress}
+                  data={data}
+                  isBooting={isBooting}
+                  state={state}
+                  visualFocus={visualFocus}
+                  onOpenRelationship={() => {
+                    onOpenRelationship();
+                    setOpen(null);
+                  }}
+                  onOpenTimeline={() => {
+                    onOpenTimeline();
+                    setOpen(null);
+                  }}
+                />
+              )}
+
               {open === "locations" && data && (
                 <div className="flex flex-col gap-1.5">
                   {data.unlockedLocations.map((location) => (
@@ -1013,7 +1139,6 @@ export function CenterStage({
   chatMode,
   commandDisabled,
   currentLocation,
-  evidenceCount,
   input,
   isActing,
   isBooting,
@@ -1023,6 +1148,7 @@ export function CenterStage({
   visualFocus,
   visualManifest,
   onCommand,
+  onRequestExit,
 }: {
   activeStep: BootStepId;
   bootError: string;
@@ -1032,7 +1158,6 @@ export function CenterStage({
   chatMode: ChatModeState;
   commandDisabled: boolean;
   currentLocation?: InvestigationData["currentLocation"];
-  evidenceCount: number;
   input: string;
   isActing: boolean;
   isBooting: boolean;
@@ -1042,14 +1167,13 @@ export function CenterStage({
   visualFocus: VisualFocusState;
   visualManifest?: CaseVisualManifest;
   onCommand: (command: string) => void;
+  onRequestExit: () => void;
 }) {
   const workspaceRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const [cmdExpanded, setCmdExpanded] = useState(false);
   const [selectedAttachment, setSelectedAttachment] = useState<VisualAsset | null>(null);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const locationPulse = usePulseFlag(currentLocation?.id ?? "", 1100);
-  const evidencePulse = usePulseFlag(evidenceCount, 1100);
   const solvedPulse = usePulseFlag(phase === "solved", 1700);
 
   useEffect(() => {
@@ -1064,21 +1188,21 @@ export function CenterStage({
   return (
     <motion.section
       ref={workspaceRef}
-      className="relative min-h-0 overflow-hidden bg-[#ede8dc]"
+      className="relative min-h-0 overflow-hidden bg-[#f4f0e7] shadow-[inset_1px_0_0_rgba(255,255,255,0.55),inset_-1px_0_0_rgba(80,69,52,0.08)]"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.32, ease: "easeOut" }}
     >
       {isBooting ? (
-        <div className="td-scrollbar h-full overflow-y-auto p-4">
+        <div className="td-scrollbar h-full overflow-y-auto bg-[#f4f0e7] p-5">
           <BootConsole activeStep={activeStep} error={bootError} progress={bootProgress} status={bootStatus} />
         </div>
       ) : (
-        <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#f1eee6] text-[#27241f]">
+        <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#f6f2ea] text-[#27241f]">
           <motion.div
-            className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(39,36,31,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(39,36,31,0.9)_1px,transparent_1px)]"
+            className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(39,36,31,0.42)_1px,transparent_1px),linear-gradient(90deg,rgba(39,36,31,0.42)_1px,transparent_1px)]"
             animate={{
-              opacity: isInterrogation ? 0.11 : 0.07,
+              opacity: isInterrogation ? 0.12 : 0.08,
               backgroundSize: isInterrogation ? "24px 24px" : "28px 28px",
             }}
             transition={{ duration: 0.34 }}
@@ -1092,6 +1216,8 @@ export function CenterStage({
             }}
             transition={{ duration: 0.3 }}
           />
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-10 bg-[linear-gradient(90deg,rgba(36,97,91,0.1),transparent)]" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-[linear-gradient(270deg,rgba(80,69,52,0.1),transparent)]" />
           {currentLocation && (
             <div className="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
               <div className="absolute left-[8%] top-[22%] max-w-5xl select-none font-display text-7xl font-black leading-none text-[#24615b]/[0.045] md:text-8xl lg:text-9xl">
@@ -1106,7 +1232,7 @@ export function CenterStage({
           <motion.div
             className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b px-5 shadow-[0_12px_36px_rgba(36,30,22,0.08)]"
             animate={{
-              backgroundColor: isInterrogation ? "rgba(255, 240, 234, 0.94)" : "rgba(251, 248, 240, 0.92)",
+              backgroundColor: isInterrogation ? "rgba(255, 240, 234, 0.94)" : "rgba(251, 248, 240, 0.9)",
               borderColor: isInterrogation ? "#d0a092" : "#c8c0ae",
             }}
             transition={{ duration: 0.28 }}
@@ -1131,59 +1257,38 @@ export function CenterStage({
                 </p>
               </div>
             </div>
-            <motion.div
-              className="flex items-center gap-2 rounded-full border bg-white/70 px-3 py-1.5 font-mono text-[0.62rem]"
-              animate={{
-                borderColor: isInterrogation ? "#d0a092" : "#d8cfba",
-                color: isInterrogation ? "#a64e3b" : "#24615b",
-              }}
-            >
-              <motion.span
-                className="h-1.5 w-1.5 rounded-full"
+            <div className="flex shrink-0 items-center gap-2">
+              <motion.div
+                className="flex items-center gap-2 rounded-full border bg-white/70 px-3 py-1.5 font-mono text-[0.62rem]"
                 animate={{
-                  scale: isActing ? [1, 1.55, 1] : [1, 1.25, 1],
-                  backgroundColor: isInterrogation ? "#c5533d" : "#2a8c80",
+                  borderColor: isInterrogation ? "#d0a092" : "#d8cfba",
+                  color: isInterrogation ? "#a64e3b" : "#24615b",
                 }}
-                transition={{ duration: isInterrogation ? 1.25 : 1, repeat: Infinity }}
-              />
-              {statusText}
-            </motion.div>
+              >
+                <motion.span
+                  className="h-1.5 w-1.5 rounded-full"
+                  animate={{
+                    scale: isActing ? [1, 1.55, 1] : [1, 1.25, 1],
+                    backgroundColor: isInterrogation ? "#c5533d" : "#2a8c80",
+                  }}
+                  transition={{ duration: isInterrogation ? 1.25 : 1, repeat: Infinity }}
+                />
+                {statusText}
+              </motion.div>
+              <button
+                aria-label="退出案件"
+                className="grid h-9 w-9 place-items-center rounded-md border border-[#d8cfba] bg-[#fffdf7]/78 text-[#675d4f] shadow-sm transition hover:border-[#a64e3b] hover:bg-[#fff0ea] hover:text-[#a64e3b]"
+                onClick={onRequestExit}
+                title="退出案件"
+                type="button"
+              >
+                <LogOut size={15} />
+              </button>
+            </div>
           </motion.div>
 
-          <AnimatePresence>
-            {locationPulse && currentLocation && (
-              <motion.div
-                className="pointer-events-none absolute inset-x-8 top-20 z-20 overflow-hidden border border-[#b8d8d2] bg-[#e8f6f2]/92 px-4 py-3 shadow-[0_18px_50px_rgba(36,30,22,0.14)]"
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.2 }}
-              >
-                <motion.div
-                  className="absolute inset-y-0 left-0 w-1/2 bg-[linear-gradient(90deg,transparent,rgba(111,213,199,0.28),transparent)]"
-                  initial={{ x: "-120%" }}
-                  animate={{ x: "240%" }}
-                  transition={{ duration: 0.85, ease: "easeInOut" }}
-                />
-                <p className="relative font-mono text-[0.62rem] uppercase tracking-[0.2em] text-[#24615b]">current location updated</p>
-                <p className="relative mt-1 line-clamp-1 text-sm font-bold text-[#27241f]">{currentLocation.name}</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <div ref={chatScrollRef} className="td-scrollbar relative z-10 min-h-0 flex-1 overflow-y-auto px-6 pb-36 pt-6">
-            <AnimatePresence>
-              {evidencePulse && (
-                <motion.div
-                  className="pointer-events-none absolute inset-x-6 top-0 h-1 bg-[linear-gradient(90deg,transparent,#6fd5c7,#e7f05f,transparent)]"
-                  initial={{ opacity: 0, scaleX: 0, transformOrigin: "0% 50%" }}
-                  animate={{ opacity: 1, scaleX: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.5, ease: "easeOut" }}
-                />
-              )}
-            </AnimatePresence>
-            <div className="mx-auto flex max-w-3xl flex-col gap-4">
+          <div ref={chatScrollRef} className="td-scrollbar relative z-10 min-h-0 flex-1 overflow-y-auto px-4 pb-36 pt-7 sm:px-6 lg:px-8">
+            <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-4">
               <VisualStage
                 chatMode={chatMode}
                 currentLocation={currentLocation}
@@ -1191,7 +1296,7 @@ export function CenterStage({
                 manifest={visualManifest}
               />
               {chatMessages.length === 0 && (
-                <div className="border border-l-4 border-[#d8cfba] border-l-[#24615b] bg-[#fffdf7]/72 p-5 shadow-[0_18px_60px_rgba(49,40,28,0.1)] backdrop-blur-sm">
+                <div className="rounded-lg border border-l-4 border-[#d8cfba] border-l-[#24615b] bg-[#fffdf7]/82 p-5 shadow-[0_18px_60px_rgba(49,40,28,0.1)] backdrop-blur-sm">
                   <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#24615b]">现场记录</p>
                   <p className="mt-3 text-sm leading-6 text-[#625a4d]">
                     我先把现场压一下：现在人在{currentLocation?.name ?? "案发现场"}。
@@ -1292,10 +1397,10 @@ export function CenterStage({
       </AnimatePresence>
 
       {!isBooting && (
-        <div className="absolute bottom-5 left-1/2 z-20 w-[min(700px,calc(100%-2.5rem))] -translate-x-1/2">
+        <div className="absolute bottom-4 left-1/2 z-20 w-[min(860px,calc(100%-2rem))] -translate-x-1/2">
           <motion.div
             className={[
-              "rounded-xl border border-[#d6c9ae] bg-[#fffdf7]/95 shadow-[0_22px_80px_rgba(36,30,22,0.24)] backdrop-blur",
+              "rounded-lg border border-[#cfc4ad] bg-[#fffdf7]/96 shadow-[0_18px_64px_rgba(36,30,22,0.2)] backdrop-blur",
               isActing ? "td-scanline" : "",
             ].join(" ")}
             animate={{ height: cmdExpanded ? "auto" : undefined }}
@@ -1369,6 +1474,194 @@ export function CenterStage({
   );
 }
 
+function CaseChartPanel({
+  actionStatus,
+  activeStep,
+  bootProgress,
+  data,
+  isBooting,
+  state,
+  visualFocus,
+  onOpenRelationship,
+  onOpenTimeline,
+}: {
+  actionStatus: string;
+  activeStep: BootStepId;
+  bootProgress: number;
+  data: InvestigationData | null;
+  isBooting: boolean;
+  state?: PlayerCaseState;
+  visualFocus: VisualFocusState;
+  onOpenRelationship: () => void;
+  onOpenTimeline: () => void;
+}) {
+  const [suspectsExpanded, setSuspectsExpanded] = useState(false);
+  const previousTruthScore = usePrevious(state?.truthScore ?? 0);
+  const truthDelta = state ? state.truthScore - previousTruthScore : 0;
+  const truthPulse = usePulseFlag(state?.truthScore ?? 0, 1100);
+
+  useEffect(() => {
+    if (data?.visibleSuspects.length) setSuspectsExpanded(true);
+  }, [data?.visibleSuspects.length]);
+
+  if (isBooting || !data || !state) {
+    return (
+      <div className="rounded-lg border border-[#d8cfba] bg-[#fffdf7] p-4 shadow-[0_10px_28px_rgba(49,40,28,0.08)]">
+        <p className="font-mono text-[0.68rem] font-bold uppercase tracking-[0.16em] text-[#174844]">案件图表生成中</p>
+        <p className="mt-2 text-xs leading-5 text-[#4f483d]">{bootSteps.find((s) => s.id === activeStep)?.title}</p>
+        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#d8cfba]">
+          <div className="h-full bg-[#e7f05f] transition-all duration-500" style={{ width: `${bootProgress}%` }} />
+        </div>
+      </div>
+    );
+  }
+
+  const metricMax = Math.max(1, data.discoveredEvidence.length, data.visibleSuspects.length, state.playerTimeline.length);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-lg border border-[#d8cfba] bg-[#fffdf7] p-4 shadow-[0_10px_28px_rgba(49,40,28,0.08)]">
+        <div className="flex items-center gap-3">
+          <TruthGauge score={state.truthScore} delta={truthDelta} pulse={truthPulse} />
+          <div className="min-w-0">
+            <p className="font-mono text-[0.62rem] uppercase tracking-widest text-[#174844]">{phaseLabels[state.phase]}</p>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#4f483d]">{shortText(actionStatus, 48)}</p>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-1.5">
+          <MiniStat label="证据" value={String(data.discoveredEvidence.length)} />
+          <MiniStat label="人物" value={String(data.visibleSuspects.length)} />
+          <MiniStat label="时间" value={String(state.playerTimeline.length)} />
+        </div>
+        <div className="mt-4 border-t border-[#e3dac8] pt-3">
+          <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-[#8a5d19]">调查分布</p>
+          <div className="mt-3 grid gap-2">
+            <MetricTrack label="证据索引" value={data.discoveredEvidence.length} max={metricMax} tone="scan" />
+            <MetricTrack label="人物状态" value={data.visibleSuspects.length} max={metricMax} tone="rust" />
+            <MetricTrack label="时间节点" value={state.playerTimeline.length} max={metricMax} tone="brass" />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          className="flex items-center justify-center gap-2 rounded-md border border-[#cdbf9e] bg-[#fffdf7] py-2.5 font-mono text-[0.68rem] font-bold text-[#8a5d19] transition hover:border-[#9d6d21] hover:bg-[#fffaf0]"
+          onClick={onOpenRelationship}
+          type="button"
+        >
+          <GitBranch size={13} />
+          关系图
+        </button>
+        <button
+          className="flex items-center justify-center gap-2 rounded-md border border-[#cdbf9e] bg-[#fffdf7] py-2.5 font-mono text-[0.68rem] font-bold text-[#8a5d19] transition hover:border-[#9d6d21] hover:bg-[#fffaf0]"
+          onClick={onOpenTimeline}
+          type="button"
+        >
+          <Clock3 size={13} />
+          时间线
+        </button>
+      </div>
+
+      <div className="rounded-lg border border-[#d8cfba] bg-[#fffdf7] p-3">
+        <button
+          aria-expanded={data.visibleSuspects.length > 0 ? suspectsExpanded : undefined}
+          className={[
+            "flex w-full items-center justify-between font-mono text-[0.68rem] font-bold text-[#8a5d19] transition",
+            data.visibleSuspects.length > 0 ? "hover:text-[#6f6f18]" : "cursor-default",
+          ].join(" ")}
+          onClick={() => data.visibleSuspects.length > 0 && setSuspectsExpanded(!suspectsExpanded)}
+          type="button"
+        >
+          <span>人物状态 ({data.visibleSuspects.length})</span>
+          {data.visibleSuspects.length > 0 ? (
+            suspectsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
+          ) : (
+            <span className="text-[0.55rem] text-[#8f8574]">待确认</span>
+          )}
+        </button>
+        <AnimatePresence initial={false}>
+          {data.visibleSuspects.length > 0 && suspectsExpanded ? (
+            <motion.div
+              key="suspects"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-2 flex flex-col gap-2">
+                {data.visibleSuspects.map((suspect) => {
+                  const ss = state.suspectStates[suspect.id];
+                  return (
+                    <SuspectStatusCard
+                      key={suspect.id}
+                      active={visualFocus?.mode === "suspect" && visualFocus.entityId === suspect.id}
+                      asset={findVisualAsset(data.visualManifest, { kind: "suspect_portrait", entityId: suspect.id })}
+                      name={suspect.name}
+                      state={ss}
+                    />
+                  );
+                })}
+              </div>
+            </motion.div>
+          ) : data.visibleSuspects.length === 0 ? (
+            <motion.div
+              key="suspect-empty"
+              className="mt-2 border border-dashed border-[#d6c9ae] bg-[#f4efe5] p-3"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="flex items-center gap-2 text-[#8f8574]">
+                <UserRound size={14} />
+                <p className="font-mono text-[0.58rem] uppercase tracking-[0.16em]">no suspect pinned</p>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-[#4f483d]">
+                等门禁、监控、口供或物证指到某个人，这里会自动亮出人物状态。
+              </p>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+function MetricTrack({
+  label,
+  max,
+  tone,
+  value,
+}: {
+  label: string;
+  max: number;
+  tone: "scan" | "rust" | "brass";
+  value: number;
+}) {
+  const colorClass = {
+    brass: "bg-[#d6a247]",
+    rust: "bg-[#c5533d]",
+    scan: "bg-[#24615b]",
+  }[tone];
+  const width = max > 0 ? `${Math.min(100, Math.max(0, (value / max) * 100))}%` : "0%";
+
+  return (
+    <div className="grid grid-cols-[4.5rem_1fr_2rem] items-center gap-2">
+      <span className="font-mono text-[0.6rem] font-bold text-[#5f564a]">{label}</span>
+      <span className="h-2 overflow-hidden rounded-full bg-[#d3c8b2]">
+        <motion.span
+          className={`block h-full rounded-full ${colorClass}`}
+          initial={{ width: 0 }}
+          animate={{ width }}
+          transition={{ duration: 0.38, ease: [0.25, 0.1, 0.25, 1] }}
+        />
+      </span>
+      <span className="text-right font-mono text-[0.6rem] font-bold text-[#675d4f]">{value}</span>
+    </div>
+  );
+}
+
 export function RightRail({
   actionStatus,
   activeStep,
@@ -1401,8 +1694,12 @@ export function RightRail({
 
   if (isBooting || !data || !state) {
     return (
-      <aside className="flex h-full flex-col gap-4 border-l border-[#d8cfba] bg-[#ede8dc] p-4">
-        <div>
+      <aside className="flex h-full flex-col overflow-hidden border-l border-[#c8bda7] bg-[#f6f1e8]/96">
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-[#d8cfba] bg-[#fbf8f0]/88 px-4">
+          <span className="font-mono text-[0.65rem] font-bold uppercase tracking-[0.16em] text-[#24615b]">案件状态</span>
+          <span className="font-mono text-[0.56rem] text-[#8f8574]">生成中</span>
+        </div>
+        <div className="p-4">
           <p className="font-mono text-[0.65rem] text-[#24615b]">生成状态</p>
           <p className="mt-2 text-xs text-[#675d4f]">{bootSteps.find((s) => s.id === activeStep)?.title}</p>
           <div className="mt-3 h-1 bg-[#d8cfba]">
@@ -1415,13 +1712,21 @@ export function RightRail({
 
   return (
     <motion.aside
-      className="td-scrollbar flex h-full flex-col gap-4 overflow-y-auto border-l border-[#d8cfba] bg-[#ede8dc] p-4"
+      className="td-scrollbar flex h-full flex-col overflow-y-auto border-l border-[#c8bda7] bg-[#f6f1e8]/96 shadow-[inset_1px_0_0_rgba(255,255,255,0.5)]"
       initial={{ opacity: 0, x: 12 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.28, ease: "easeOut" }}
     >
+      <div className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between border-b border-[#d8cfba] bg-[#fbf8f0]/90 px-4 backdrop-blur">
+        <span className="font-mono text-[0.65rem] font-bold uppercase tracking-[0.16em] text-[#24615b]">案件状态</span>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-[#d8cfba] bg-[#fffdf7]/76 px-2 py-1 font-mono text-[0.55rem] text-[#8f8574]">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#6fd5c7]" />
+          live
+        </span>
+      </div>
+      <div className="flex flex-col gap-4 p-4">
       {/* Truth gauge */}
-      <div>
+      <div className="rounded-lg border border-[#d8cfba] bg-[#fffdf7]/62 p-3 shadow-[0_12px_34px_rgba(49,40,28,0.08)]">
         <div className="flex items-center gap-3">
           <TruthGauge score={state.truthScore} delta={truthDelta} pulse={truthPulse} />
           <div>
@@ -1439,7 +1744,7 @@ export function RightRail({
       {/* Modal triggers */}
       <div className="grid grid-cols-2 gap-2">
         <button
-          className="flex items-center justify-center gap-2 border border-[#d6c9ae] py-2 font-mono text-[0.65rem] text-[#9d6d21] transition hover:bg-[#f4efe5]"
+          className="flex items-center justify-center gap-2 rounded-md border border-[#d6c9ae] bg-[#fffdf7]/42 py-2 font-mono text-[0.65rem] text-[#9d6d21] transition hover:bg-[#fffdf7]"
           onClick={onOpenRelationship}
           type="button"
         >
@@ -1447,7 +1752,7 @@ export function RightRail({
           关系图
         </button>
         <button
-          className="flex items-center justify-center gap-2 border border-[#d6c9ae] py-2 font-mono text-[0.65rem] text-[#9d6d21] transition hover:bg-[#f4efe5]"
+          className="flex items-center justify-center gap-2 rounded-md border border-[#d6c9ae] bg-[#fffdf7]/42 py-2 font-mono text-[0.65rem] text-[#9d6d21] transition hover:bg-[#fffdf7]"
           onClick={onOpenTimeline}
           type="button"
         >
@@ -1457,7 +1762,7 @@ export function RightRail({
       </div>
 
       {/* Suspects accordion */}
-      <div>
+      <div className="rounded-lg border border-[#d8cfba] bg-[#fffdf7]/48 p-3">
         <button
           aria-expanded={data.visibleSuspects.length > 0 ? suspectsExpanded : undefined}
           className={[
@@ -1519,21 +1824,8 @@ export function RightRail({
           ) : null}
         </AnimatePresence>
       </div>
+      </div>
     </motion.aside>
-  );
-}
-
-function NodeBadge({ asset, label }: { asset?: VisualAsset; label: string }) {
-  return (
-    <motion.div
-      className="grid min-h-16 place-items-center gap-1 border border-[#d8cfba] bg-[#fff5db] p-2 text-center"
-      initial={{ opacity: 0, y: 5 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.18 }}
-    >
-      <VisualThumb asset={asset} className="h-9 w-9 rounded-md" />
-      <span className="line-clamp-2 text-xs font-semibold text-[#27241f]">{label}</span>
-    </motion.div>
   );
 }
 
@@ -1695,6 +1987,426 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+type RelationshipItem = InvestigationData["visibleRelationships"][number];
+type RelationshipNodeKind = "victim" | "suspect" | "witness" | "evidence" | "location" | "unknown";
+
+type RelationshipNode = {
+  id: string;
+  kind: RelationshipNodeKind;
+  label: string;
+  subtitle: string;
+  x: number;
+  y: number;
+  degree: number;
+};
+
+type RelationshipEdge = RelationshipItem & {
+  path: string;
+  labelX: number;
+  labelY: number;
+  source: RelationshipNode;
+  target: RelationshipNode;
+};
+
+const relationshipStatusLabels: Record<RelationshipItem["status"], string> = {
+  unknown: "未知",
+  suspected: "疑似",
+  conflict: "冲突",
+  confirmed: "确认",
+  excluded: "排除",
+  key: "关键",
+};
+
+const relationshipTypeLabels: Record<RelationshipItem["type"], string> = {
+  normal: "普通",
+  conflict: "矛盾",
+  hidden: "隐秘",
+  time: "时间",
+  evidence: "证据",
+  misleading: "误导",
+};
+
+const relationshipKindLabels: Record<RelationshipNodeKind, string> = {
+  victim: "当事人",
+  suspect: "嫌疑人",
+  witness: "证人",
+  evidence: "证据",
+  location: "地点",
+  unknown: "关联",
+};
+
+const relationshipStatusTone: Record<
+  RelationshipItem["status"],
+  { border: string; fill: string; stroke: string; text: string; dash?: string }
+> = {
+  unknown: { border: "#d8cfba", fill: "#f4efe5", stroke: "#8f8574", text: "#675d4f", dash: "6 7" },
+  suspected: { border: "#d6a247", fill: "#fff5db", stroke: "#9d6d21", text: "#7a5319", dash: "9 7" },
+  conflict: { border: "#d0a092", fill: "#fff0ea", stroke: "#c5533d", text: "#9a3829" },
+  confirmed: { border: "#b8d8d2", fill: "#e8f6f2", stroke: "#24615b", text: "#174844" },
+  excluded: { border: "#c8bda7", fill: "#ede8dc", stroke: "#8f8574", text: "#5f564a", dash: "4 8" },
+  key: { border: "#c5533d", fill: "#fff0ea", stroke: "#a64e3b", text: "#7f241c" },
+};
+
+const relationshipNodeTone: Record<RelationshipNodeKind, { border: string; fill: string; text: string; ring: string }> = {
+  victim: { border: "#b86956", fill: "#fff0ea", text: "#8e3227", ring: "#c5533d" },
+  suspect: { border: "#d6a247", fill: "#fff5db", text: "#7a5319", ring: "#d6a247" },
+  witness: { border: "#b8d8d2", fill: "#e8f6f2", text: "#174844", ring: "#24615b" },
+  evidence: { border: "#c8bda7", fill: "#fffdf7", text: "#675d4f", ring: "#8f8574" },
+  location: { border: "#cdbf9e", fill: "#f8f3e8", text: "#675d4f", ring: "#9d6d21" },
+  unknown: { border: "#d8cfba", fill: "#f4efe5", text: "#675d4f", ring: "#8f8574" },
+};
+
+function relationshipEntityKind(data: InvestigationData, entityId: string): RelationshipNodeKind {
+  if (data.caseData.victim.id === entityId) return "victim";
+  if (data.caseData.suspects.some((suspect) => suspect.id === entityId)) return "suspect";
+  if (data.caseData.witnesses.some((witness) => witness.id === entityId)) return "witness";
+  if (data.caseData.evidence.some((evidence) => evidence.id === entityId)) return "evidence";
+  if (data.caseData.locations.some((location) => location.id === entityId)) return "location";
+  return "unknown";
+}
+
+function relationshipEntitySubtitle(data: InvestigationData, entityId: string, kind: RelationshipNodeKind) {
+  if (kind === "suspect") return data.caseData.suspects.find((suspect) => suspect.id === entityId)?.identity ?? "嫌疑人";
+  if (kind === "victim") return data.caseData.victim.role || "当事人";
+  if (kind === "witness") return data.caseData.witnesses.find((witness) => witness.id === entityId)?.role ?? "证人";
+  if (kind === "evidence") {
+    const evidence = data.caseData.evidence.find((item) => item.id === entityId);
+    return evidence ? evidenceTypeLabels[evidence.type] ?? "证据" : "证据";
+  }
+  if (kind === "location") return data.caseData.locations.find((location) => location.id === entityId)?.kind ?? "地点";
+  return "关联节点";
+}
+
+function nodeIcon(kind: RelationshipNodeKind) {
+  if (kind === "evidence") return Fingerprint;
+  if (kind === "location") return MapPin;
+  if (kind === "unknown") return FileText;
+  return UserRound;
+}
+
+function relationshipPairKey(rel: Pick<RelationshipItem, "from" | "to">) {
+  return [rel.from, rel.to].sort().join("::");
+}
+
+function relationshipGeometry(
+  source: RelationshipNode,
+  target: RelationshipNode,
+  pairIndex: number,
+  pairTotal: number,
+) {
+  const x1 = source.x * 10;
+  const y1 = source.y * 6.4;
+  const x2 = target.x * 10;
+  const y2 = target.y * 6.4;
+  const midX = (x1 + x2) / 2;
+  const midY = (y1 + y2) / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const distance = Math.max(Math.hypot(dx, dy), 1);
+  const normalX = -dy / distance;
+  const normalY = dx / distance;
+  const duplicateOffset = pairTotal > 1 ? (pairIndex - (pairTotal - 1) / 2) * 56 : 0;
+  const longCrossOffset = pairTotal === 1 && source.degree > 1 && target.degree > 1 ? 18 : 0;
+  const offset = duplicateOffset || longCrossOffset;
+
+  if (!offset) {
+    return {
+      path: `M ${x1} ${y1} L ${x2} ${y2}`,
+      labelX: midX,
+      labelY: midY,
+    };
+  }
+
+  const controlX = midX + normalX * offset;
+  const controlY = midY + normalY * offset;
+
+  return {
+    path: `M ${x1} ${y1} Q ${controlX} ${controlY} ${x2} ${y2}`,
+    labelX: controlX,
+    labelY: controlY,
+  };
+}
+
+function buildRelationshipGraph(data: InvestigationData) {
+  const personRelationships = data.visibleRelationships.filter((rel) => {
+    const sourceKind = relationshipEntityKind(data, rel.from);
+    const targetKind = relationshipEntityKind(data, rel.to);
+    return rel.from !== rel.to && ["victim", "suspect", "witness"].includes(sourceKind) && ["victim", "suspect", "witness"].includes(targetKind);
+  });
+  const ids = new Set<string>();
+  const degree = new Map<string, number>();
+
+  personRelationships.forEach((rel) => {
+    ids.add(rel.from);
+    ids.add(rel.to);
+    degree.set(rel.from, (degree.get(rel.from) ?? 0) + 1);
+    degree.set(rel.to, (degree.get(rel.to) ?? 0) + 1);
+  });
+
+  const nodeIds = Array.from(ids);
+  const hubId = [...nodeIds].sort((a, b) => {
+    const degreeDelta = (degree.get(b) ?? 0) - (degree.get(a) ?? 0);
+    if (degreeDelta !== 0) return degreeDelta;
+    const aKind = relationshipEntityKind(data, a);
+    const bKind = relationshipEntityKind(data, b);
+    const rank: Record<RelationshipNodeKind, number> = {
+      evidence: 5,
+      victim: 4,
+      suspect: 3,
+      witness: 2,
+      location: 1,
+      unknown: 0,
+    };
+    return rank[bKind] - rank[aKind];
+  })[0];
+  const orderedIds = hubId
+    ? [hubId, ...nodeIds.filter((id) => id !== hubId).sort((a, b) => (degree.get(b) ?? 0) - (degree.get(a) ?? 0))]
+    : nodeIds;
+
+  const nodes: RelationshipNode[] = orderedIds.map((id, index) => {
+    const kind = relationshipEntityKind(data, id);
+    const base = {
+      id,
+      kind,
+      label: data.entityNameById.get(id) ?? id,
+      subtitle: relationshipEntitySubtitle(data, id, kind),
+      degree: degree.get(id) ?? 0,
+    };
+
+    if (orderedIds.length === 1) return { ...base, x: 50, y: 50 };
+    if (orderedIds.length === 2) return { ...base, x: index === 0 ? 34 : 66, y: 50 };
+    if (index === 0) return { ...base, x: 50, y: 50 };
+
+    const ringCount = orderedIds.length - 1;
+    const topologySlots = [
+      { x: 50, y: 22 },
+      { x: 78, y: 50 },
+      { x: 50, y: 78 },
+      { x: 22, y: 50 },
+      { x: 72, y: 28 },
+      { x: 72, y: 72 },
+      { x: 28, y: 72 },
+      { x: 28, y: 28 },
+      { x: 87, y: 35 },
+      { x: 87, y: 65 },
+      { x: 13, y: 65 },
+      { x: 13, y: 35 },
+    ];
+    const slot = topologySlots[index - 1];
+    if (slot) return { ...base, ...slot };
+
+    const angle = -Math.PI / 2 + ((index - 1) / ringCount) * Math.PI * 2;
+    const radiusX = 38;
+    const radiusY = 32;
+
+    return {
+      ...base,
+      x: 50 + Math.cos(angle) * radiusX,
+      y: 50 + Math.sin(angle) * radiusY,
+    };
+  });
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const pairTotals = new Map<string, number>();
+  const pairSeen = new Map<string, number>();
+
+  personRelationships.forEach((rel) => {
+    const key = relationshipPairKey(rel);
+    pairTotals.set(key, (pairTotals.get(key) ?? 0) + 1);
+  });
+
+  const edges: RelationshipEdge[] = personRelationships
+    .map((rel) => {
+      const source = nodeById.get(rel.from);
+      const target = nodeById.get(rel.to);
+      if (!source || !target) return null;
+
+      const key = relationshipPairKey(rel);
+      const pairIndex = pairSeen.get(key) ?? 0;
+      pairSeen.set(key, pairIndex + 1);
+      const geometry = relationshipGeometry(source, target, pairIndex, pairTotals.get(key) ?? 1);
+
+      return {
+        ...rel,
+        ...geometry,
+        source,
+        target,
+      };
+    })
+    .filter((edge): edge is RelationshipEdge => Boolean(edge));
+
+  return { nodes, edges };
+}
+
+function RelationshipGraphNode({
+  data,
+  node,
+  index,
+}: {
+  data: InvestigationData;
+  node: RelationshipNode;
+  index: number;
+}) {
+  const tone = relationshipNodeTone[node.kind];
+  const asset = findEntityVisual(data, node.id);
+  const Icon = nodeIcon(node.kind);
+
+  return (
+    <motion.div
+      className="absolute z-20 w-[7.5rem] -translate-x-1/2 -translate-y-1/2 sm:w-[8.25rem]"
+      style={{ left: `${node.x}%`, top: `${node.y}%` }}
+      initial={{ opacity: 0, scale: 0.92, y: 6 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      transition={{ delay: 0.08 + index * 0.04, duration: 0.22, ease: "easeOut" }}
+    >
+      <div
+        className="relative overflow-hidden rounded-md border px-2.5 pb-2 pt-2 text-center shadow-[0_16px_34px_rgba(49,40,28,0.12)]"
+        style={{ backgroundColor: tone.fill, borderColor: tone.border }}
+      >
+        <span className="absolute left-2 top-2 font-mono text-[0.52rem] font-bold uppercase text-[#8f8574]">
+          {relationshipKindLabels[node.kind]}
+        </span>
+        <div className="mx-auto mt-2 grid h-11 w-11 place-items-center overflow-hidden rounded-full border-2 bg-[#fffdf7]" style={{ borderColor: tone.ring }}>
+          {asset ? <VisualThumb asset={asset} className="h-full w-full rounded-full border-0" /> : <Icon size={20} style={{ color: tone.text }} />}
+        </div>
+        <p className="mt-2 line-clamp-1 text-sm font-black leading-5 text-[#27241f]">{node.label}</p>
+        <p className="line-clamp-1 text-[0.62rem] leading-4" style={{ color: tone.text }}>
+          {node.subtitle}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+function RelationshipGraph({
+  data,
+  edges,
+  nodes,
+}: {
+  data: InvestigationData;
+  edges: RelationshipEdge[];
+  nodes: RelationshipNode[];
+}) {
+  const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
+  const activeEdge = edges.find((edge) => edge.id === activeEdgeId) ?? null;
+
+  return (
+    <div className="td-scrollbar overflow-x-auto">
+      <div
+        className="relative min-w-[40rem] overflow-hidden rounded-lg border border-[#d8cfba] bg-[#f8f3e8] md:min-w-0"
+        style={{ height: "min(38rem, calc(100dvh - 10rem))" }}
+      >
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,253,247,0.78),rgba(248,243,232,0.28)_38%,transparent_64%),linear-gradient(rgba(80,69,52,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(80,69,52,0.06)_1px,transparent_1px)] bg-[size:auto,40px_40px,40px_40px]" />
+        <svg className="absolute inset-0 z-10 h-full w-full" viewBox="0 0 1000 640" aria-hidden="true">
+          {edges.map((edge, index) => {
+            const tone = relationshipStatusTone[edge.status];
+            const active = edge.id === activeEdgeId;
+            return (
+              <g key={edge.id}>
+                <motion.path
+                  d={edge.path}
+                  fill="none"
+                  stroke={tone.stroke}
+                  strokeLinecap="round"
+                  strokeWidth={active ? 5 : edge.status === "key" ? 3.6 : 2.6}
+                  vectorEffect="non-scaling-stroke"
+                  initial={{ pathLength: 0, opacity: 0 }}
+                  animate={{ pathLength: 1, opacity: active ? 0.98 : edge.status === "excluded" ? 0.34 : 0.58 }}
+                  transition={{ delay: index * 0.035 + 0.1, duration: 0.48, ease: "easeInOut" }}
+                />
+                <motion.path
+                  d={edge.path}
+                  fill="none"
+                  stroke={tone.stroke}
+                  strokeDasharray={active ? "10 12" : "2 18"}
+                  strokeLinecap="round"
+                  strokeWidth={active ? 4 : 3}
+                  vectorEffect="non-scaling-stroke"
+                  initial={{ opacity: 0 }}
+                  animate={{
+                    opacity: active ? 1 : 0.74,
+                    strokeDashoffset: [0, -56],
+                  }}
+                  transition={{
+                    opacity: { delay: index * 0.035 + 0.18, duration: 0.25 },
+                    strokeDashoffset: { duration: active ? 0.8 : 1.35, ease: "linear", repeat: Infinity },
+                  }}
+                />
+                <path
+                  className="cursor-pointer"
+                  d={edge.path}
+                  fill="none"
+                  pointerEvents="stroke"
+                  stroke="transparent"
+                  strokeLinecap="round"
+                  strokeWidth={22}
+                  onMouseEnter={() => setActiveEdgeId(edge.id)}
+                  onMouseLeave={() => setActiveEdgeId((current) => (current === edge.id ? null : current))}
+                />
+              </g>
+            );
+          })}
+          {nodes.map((node) => (
+            <motion.circle
+              key={node.id}
+              cx={node.x * 10}
+              cy={node.y * 6.4}
+              r="5"
+              fill={relationshipNodeTone[node.kind].ring}
+              initial={{ opacity: 0, r: 3 }}
+              animate={{ opacity: [0.42, 0.84, 0.42], r: [4, 7, 4] }}
+              transition={{ delay: 0.2, duration: 1.8, repeat: Infinity, repeatDelay: 0.7 }}
+            />
+          ))}
+        </svg>
+        {nodes.map((node, index) => (
+          <RelationshipGraphNode key={node.id} data={data} node={node} index={index} />
+        ))}
+        <AnimatePresence>
+          {activeEdge && <RelationshipEdgeTooltip edge={activeEdge} />}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+function RelationshipEdgeTooltip({ edge }: { edge: RelationshipEdge }) {
+  const tone = relationshipStatusTone[edge.status];
+
+  return (
+    <motion.div
+      className="pointer-events-none absolute z-30 w-[17rem] -translate-x-1/2 -translate-y-[calc(100%+0.75rem)] rounded-md border bg-[#fffdf7] p-3 shadow-[0_20px_46px_rgba(49,40,28,0.22)]"
+      style={{
+        borderColor: tone.border,
+        left: `${Math.max(17, Math.min(83, edge.labelX / 10))}%`,
+        top: `${Math.max(24, Math.min(86, edge.labelY / 6.4))}%`,
+      }}
+      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 6, scale: 0.98 }}
+      transition={{ duration: 0.16, ease: "easeOut" }}
+    >
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="line-clamp-1 text-xs font-black text-[#27241f]">
+            {edge.source.label} 与 {edge.target.label}
+          </p>
+          <p className="mt-0.5 font-mono text-[0.55rem] uppercase tracking-[0.12em]" style={{ color: tone.text }}>
+            {relationshipStatusLabels[edge.status]} / {relationshipTypeLabels[edge.type]}
+          </p>
+        </div>
+        <span
+          className="shrink-0 rounded-sm border px-1.5 py-0.5 font-mono text-[0.54rem] font-bold"
+          style={{ backgroundColor: tone.fill, borderColor: tone.border, color: tone.text }}
+        >
+          {relationshipStatusLabels[edge.status]}
+        </span>
+      </div>
+      <p className="text-xs leading-5 text-[#4f483d]">{edge.label}</p>
+    </motion.div>
+  );
+}
+
 export function RelationshipModal({
   data,
   onClose,
@@ -1702,63 +2414,47 @@ export function RelationshipModal({
   data: InvestigationData;
   onClose: () => void;
 }) {
+  const graph = buildRelationshipGraph(data);
+
   return (
     <motion.div
-      className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur"
+      className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-3 backdrop-blur sm:p-6"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       onClick={onClose}
     >
       <motion.div
-        className="w-full max-w-2xl border border-[#cfa65b] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]"
+        className="grid max-h-[calc(100dvh-1.5rem)] w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-[#cfa65b] bg-[#fffdf7] shadow-[0_24px_90px_rgba(49,40,28,0.22)]"
         initial={{ opacity: 0, y: 14, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <span className="font-mono text-xs text-[#9d6d21]">人物关系图</span>
-          <button className="text-[#8b8171] hover:text-[#9d6d21]" onClick={onClose} type="button"><X size={14} /></button>
+        <div className="flex items-start justify-between gap-4 border-b border-[#d8cfba] bg-[#fbf8f0] px-4 py-3 sm:px-5">
+          <div>
+            <p className="font-mono text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[#24615b]">relationship map</p>
+            <h3 className="mt-1 text-lg font-black leading-tight text-[#27241f]">人物关系图</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="hidden rounded-sm border border-[#d8cfba] bg-[#fffdf7] px-2 py-1 font-mono text-[0.58rem] text-[#8f8574] sm:inline-flex">
+              {graph.nodes.length} 节点 / {graph.edges.length} 关系
+            </span>
+            <button className="grid h-8 w-8 place-items-center rounded-md text-[#8b8171] hover:bg-[#f4efe5] hover:text-[#9d6d21]" onClick={onClose} type="button">
+              <X size={15} />
+            </button>
+          </div>
         </div>
-        <div className="td-scrollbar max-h-[60vh] overflow-y-auto">
-          {data.visibleRelationships.length ? (
-            <div className="grid gap-3">
-              {data.visibleRelationships.map((rel, index) => (
-                <motion.div
-                  key={rel.id}
-                  className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.045, duration: 0.22 }}
-                >
-                  <NodeBadge asset={findEntityVisual(data, rel.from)} label={data.entityNameById.get(rel.from) ?? rel.from} />
-                  <div className="grid place-items-center text-[#9d6d21]">
-                    <svg className="h-5 w-12 overflow-visible" viewBox="0 0 48 20" aria-hidden="true">
-                      <motion.path
-                        d="M2 10 C14 2, 34 18, 46 10"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        initial={{ pathLength: 0, opacity: 0.35 }}
-                        animate={{ pathLength: 1, opacity: 1 }}
-                        transition={{ delay: index * 0.045 + 0.08, duration: 0.42, ease: "easeInOut" }}
-                      />
-                    </svg>
-                    <motion.span
-                      className="mt-1 font-mono text-[0.58rem]"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: index * 0.045 + 0.28 }}
-                    >
-                      {rel.status}
-                    </motion.span>
-                  </div>
-                  <NodeBadge asset={findEntityVisual(data, rel.to)} label={data.entityNameById.get(rel.to) ?? rel.to} />
-                  <p className="col-span-3 text-center text-xs text-[#675d4f]">{rel.label}</p>
-                </motion.div>
-              ))}
+        <div className="td-scrollbar min-h-0 overflow-y-auto p-4 sm:p-5">
+          {graph.edges.length ? (
+            <div className="grid gap-4">
+              <RelationshipGraph data={data} edges={graph.edges} nodes={graph.nodes} />
             </div>
           ) : (
-            <p className="text-sm text-[#776f61]">关系图尚未形成。需要先获得能支撑关系的证据。</p>
+            <div className="grid min-h-56 place-items-center rounded-lg border border-dashed border-[#d6c9ae] bg-[#f8f3e8] p-8 text-center">
+              <div>
+                <GitBranch className="mx-auto text-[#9d6d21]" size={24} />
+                <p className="mt-3 text-sm text-[#776f61]">人物关系尚未形成。需要先让 AI 基于已知事件梳理人物之间的关系。</p>
+              </div>
+            </div>
           )}
         </div>
       </motion.div>
@@ -1775,6 +2471,8 @@ export function TimelineModal({
   state: PlayerCaseState;
   onClose: () => void;
 }) {
+  const timelineEvents = sortTimelineEvents(state.playerTimeline);
+
   return (
     <motion.div
       className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur"
@@ -1793,9 +2491,9 @@ export function TimelineModal({
           <button className="text-[#8b8171] hover:text-[#9d6d21]" onClick={onClose} type="button"><X size={14} /></button>
         </div>
         <div className="td-scrollbar max-h-[60vh] overflow-y-auto">
-          {state.playerTimeline.length ? (
+          {timelineEvents.length ? (
             <ol className="grid gap-3">
-              {state.playerTimeline.map((event, index) => (
+              {timelineEvents.map((event, index) => (
                 <motion.li
                   key={event.id}
                   className="grid grid-cols-[3.5rem_3rem_1fr] items-start gap-3"

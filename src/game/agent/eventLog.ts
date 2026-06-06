@@ -210,8 +210,8 @@ export function writeAgentClientMessageLog(message: AgentClientMessage) {
   appendLogLine({
     kind: "client.message",
     type: message.type,
-    roomId: message.type === "session.start" ? message.roomId : undefined,
-    sessionId: message.type === "player.command" ? message.sessionId : undefined,
+    roomId: message.type === "session.start" || message.type === "session.resume" ? message.roomId : undefined,
+    sessionId: message.type === "player.command" || message.type === "session.resume" ? message.sessionId : undefined,
     input: message.type === "player.command" ? message.input : undefined,
   });
 }

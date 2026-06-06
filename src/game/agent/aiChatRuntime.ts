@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { hasAiCredentials, requestAiJsonStream, requestAiTextStream, type AiMessage } from "@/ai/client";
-import type { ChatMode, ChatRoute } from "@/game/agent/chatRuntime";
+import { offTopicReply, spoilerRequestReply, type ChatMode, type ChatRoute } from "@/game/agent/chatRuntime";
 import {
   buildCurrentLocationMetadata,
   buildPublicCaseData,
@@ -196,11 +196,11 @@ function routeFromAiDecision(
   const activeSuspect = currentMode.mode === "interrogation" ? visibleById.get(currentMode.suspectId) : undefined;
 
   if (decision.kind === "off_topic") {
-    return { kind: "off_topic", reason: decision.reason || "当前窗口只接入本案调查，不处理普通办公问答。" };
+    return { kind: "off_topic", reason: offTopicReply };
   }
 
   if (decision.kind === "spoiler_request") {
-    return { kind: "spoiler_request", reason: decision.reason || "我不能直接替你定嫌疑人，但可以继续按证据拆。" };
+    return { kind: "spoiler_request", reason: spoilerRequestReply };
   }
 
   if (decision.kind === "case_assistant") {
