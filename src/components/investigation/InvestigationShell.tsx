@@ -2521,13 +2521,13 @@ export function TimelineModal({
 
   return (
     <motion.div
-      className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-6 backdrop-blur"
+      className="fixed inset-0 z-50 grid place-items-center bg-[#27241f]/35 p-3 backdrop-blur sm:p-6"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       onClick={onClose}
     >
       <motion.div
-        className="w-full max-w-2xl border border-[#cfa65b] bg-[#fffdf7] p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]"
+        className="max-h-[86vh] w-full max-w-2xl min-w-0 border border-[#cfa65b] bg-[#fffdf7] p-4 shadow-[0_18px_60px_rgba(49,40,28,0.14)] sm:p-5"
         initial={{ opacity: 0, y: 14, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
@@ -2536,37 +2536,48 @@ export function TimelineModal({
           <span className="font-mono text-xs text-[#9d6d21]">时间线</span>
           <button className="text-[#8b8171] hover:text-[#9d6d21]" onClick={onClose} type="button"><X size={14} /></button>
         </div>
-        <div className="td-scrollbar max-h-[60vh] overflow-y-auto">
+        <div className="td-scrollbar max-h-[60vh] min-w-0 overflow-y-auto pr-1">
           {timelineEvents.length ? (
-            <ol className="grid gap-3">
-              {timelineEvents.map((event, index) => (
-                <motion.li
-                  key={event.id}
-                  className="grid grid-cols-[3.5rem_3rem_1fr] items-start gap-3"
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.05, duration: 0.2 }}
-                >
-                  <motion.span
-                    className="border border-[#d6c9ae] bg-[#fff0cc] px-2 py-1 text-center font-mono text-[0.62rem] text-[#9d6d21]"
-                    initial={{ scale: 1.08 }}
-                    animate={{ scale: 1 }}
+            <ol className="grid min-w-0 gap-3">
+              {timelineEvents.map((event, index) => {
+                const asset = findEntityVisual(data, event.source);
+
+                return (
+                  <motion.li
+                    key={event.id}
+                    className="grid min-w-0 grid-cols-[4.75rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.5rem_1.25rem_minmax(0,1fr)] sm:items-stretch sm:gap-3"
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.05, duration: 0.2 }}
                   >
-                    {event.time}
-                  </motion.span>
-                  <VisualThumb asset={findEntityVisual(data, event.source)} className="h-12 w-12 rounded-md" />
-                  <p className="relative border-l border-[#cfa65b] pl-3 text-xs leading-5 text-[#3d352b]">
                     <motion.span
-                      className="absolute -left-[3px] top-1 h-1.5 w-1.5 rounded-full bg-[#24615b]"
-                      initial={{ scale: 0, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ delay: index * 0.05 + 0.1, duration: 0.18 }}
-                    />
-                    {event.description}
-                  </p>
-                </motion.li>
-              ))}
+                      className="mt-1 inline-flex min-h-8 w-full items-center justify-center border border-[#d6c9ae] bg-[#fff0cc] px-1.5 py-1 text-center font-mono text-[0.62rem] leading-tight text-[#9d6d21]"
+                      initial={{ scale: 1.08 }}
+                      animate={{ scale: 1 }}
+                      transition={{ delay: index * 0.05, duration: 0.2 }}
+                    >
+                      {event.time}
+                    </motion.span>
+                    <div className="relative hidden justify-center sm:flex">
+                      <span className="absolute bottom-0 top-4 w-px bg-[#cfa65b]" aria-hidden />
+                      <motion.span
+                        className="relative mt-4 h-2 w-2 rounded-full border border-[#fffdf7] bg-[#24615b]"
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ delay: index * 0.05 + 0.1, duration: 0.18 }}
+                      />
+                    </div>
+                    <div className="min-w-0 rounded-md border border-[#d8cfba] bg-[#fffaf0] p-3 shadow-[0_6px_18px_rgba(49,40,28,0.06)]">
+                      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+                        <VisualThumb asset={asset} className="h-20 w-full rounded-md sm:h-12 sm:w-12" />
+                        <p className="min-w-0 flex-1 whitespace-normal break-words text-sm leading-6 text-[#3d352b]">
+                          {event.description}
+                        </p>
+                      </div>
+                    </div>
+                  </motion.li>
+                );
+              })}
             </ol>
           ) : (
             <p className="text-sm text-[#776f61]">暂无已确认时间点。</p>
