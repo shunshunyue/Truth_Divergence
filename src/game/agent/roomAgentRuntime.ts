@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { claimRandomReadyCase, countReadyCases } from "@/game/cache/caseCache";
+import { claimRandomReadyCase, countReadyCases, markClaimedCaseUsed } from "@/game/cache/caseCache";
 import { ensureCaseCacheWorkerStarted } from "@/game/cache/caseCacheWorker";
 import {
   createPendingEvidenceVisualAsset,
@@ -95,6 +95,7 @@ function sessionPayload(
 ): AgentSessionPayload {
   return {
     sessionId: session.sessionId,
+    ...(session.activatedAt ? { activatedAt: session.activatedAt } : {}),
     caseData,
     state: buildPublicState(session.state),
     ...(session.visualManifest ? { visualManifest: publicVisualManifest(session.visualManifest) } : {}),
@@ -359,7 +360,7 @@ export class RoomAgentRuntime {
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
   private idleHintTimer: ReturnType<typeof setTimeout> | undefined;
   private sessionId: string | undefined;
-  private chatMode: ChatMode = { mode: "assistant", label: "案件 AI 助手" };
+  private chatMode: ChatMode = { mode: "assistant", label: "真相中枢" };
   private running = false;
 
   constructor(roomId: string = randomUUID()) {
@@ -440,6 +441,7 @@ export class RoomAgentRuntime {
 
       this.enqueueStatus("案件已领取，正在创建本局调查会话...", "critical");
       const session = createSession({
+        cacheRecordId: cachedCase.id,
         caseData: cachedCase.caseData,
         state: cachedCase.state,
         visualManifest: cachedCase.visualManifest,
@@ -484,7 +486,7 @@ export class RoomAgentRuntime {
       this.streamChatMessage({
         sessionId: session.sessionId,
         speaker: "assistant",
-        label: "案件 AI 助手",
+        label: "真相中枢",
         text: `案件已接入。你直接问要查什么，我会把查到的记录、证词或现场细节整理出来。\n当前任务：${session.caseData.openingEvent.initialPrompt}`,
       });
       this.scheduleIdleHint(session);
@@ -493,6 +495,30 @@ export class RoomAgentRuntime {
     } finally {
       this.running = false;
     }
+  }
+
+  async activate(sessionId: string) {
+    const session = getSession(sessionId);
+    if (!session) throw new Error("本局调查已失效，请重新开始。");
+
+    if (!session.activatedAt) {
+      if (session.cacheRecordId) await markClaimedCaseUsed(session.cacheRecordId);
+      const activatedAt = new Date().toISOString();
+      updateSession(session.sessionId, { activatedAt });
+      session.activatedAt = activatedAt;
+    }
+
+    this.enqueueStatus("案件已进入调查。", "critical", session.sessionId);
+    this.enqueue(
+      {
+        event: "session.ready",
+        channel: "game",
+        payload: sessionPayload(session, "案件已进入调查。"),
+      },
+      { priority: "critical", sessionId: session.sessionId, scope: "session.activate" },
+    );
+
+    return session;
   }
 
   async resume(sessionId: string) {
@@ -544,6 +570,7 @@ export class RoomAgentRuntime {
 
       const session = getSession(sessionId);
       if (!session) throw new Error("本局调查已失效，请重新开始。");
+      if (!session.activatedAt) await this.activate(session.sessionId);
       this.sessionId = session.sessionId;
 
       const turnId = randomUUID();
@@ -589,13 +616,13 @@ export class RoomAgentRuntime {
           sessionId,
           turnId,
           speaker: "assistant",
-          label: "案件 AI 助手",
+          label: "真相中枢",
           text: refusalText,
         });
         appendSessionChatMessage(sessionId, {
           role: "assistant",
           speaker: "assistant",
-          label: "案件 AI 助手",
+          label: "真相中枢",
           text: refusalText,
         });
         this.finishTurn(sessionId, turnId);
@@ -606,7 +633,7 @@ export class RoomAgentRuntime {
       let speaker: "assistant" | "suspect" = "assistant";
       let suspectId: string | undefined;
       let suspect: SuspectProfile | undefined;
-      let label = "案件 AI 助手";
+      let label = "真相中枢";
       let replyText = "";
       let activeChatMode = this.chatMode;
       let discovery: RuntimeDiscovery | undefined;
@@ -625,7 +652,7 @@ export class RoomAgentRuntime {
         replyText = buildSuspectReply(route.suspect, result.state, result);
       } else {
         if (this.chatMode.mode !== "assistant") {
-          this.chatMode = { mode: "assistant", label: "案件 AI 助手" };
+          this.chatMode = { mode: "assistant", label: "真相中枢" };
           this.enqueueChatMode(this.chatMode, sessionId);
         }
         activeChatMode = this.chatMode;

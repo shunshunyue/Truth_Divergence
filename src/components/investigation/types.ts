@@ -3,6 +3,7 @@ import type { CaseVisualManifest, VisualAsset, VisualFocusPayload } from "@/game
 
 export type SessionPayload = {
   sessionId: string;
+  activatedAt?: string;
   caseData: CaseData;
   state: PlayerCaseState;
   visualManifest?: CaseVisualManifest;

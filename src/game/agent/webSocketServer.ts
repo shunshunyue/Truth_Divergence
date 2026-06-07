@@ -23,6 +23,13 @@ function parseClientMessage(raw: WebSocket.RawData): AgentClientMessage {
     };
   }
 
+  if (parsed.type === "session.activate") {
+    return {
+      type: "session.activate",
+      sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : "",
+    };
+  }
+
   if (parsed.type === "player.command") {
     return {
       type: "player.command",
@@ -80,6 +87,11 @@ export function createAgentWebSocketServer() {
           if (message.type === "session.resume") {
             switchRoom(message.roomId);
             await roomAgent.resume(message.sessionId);
+            return;
+          }
+
+          if (message.type === "session.activate") {
+            await roomAgent.activate(message.sessionId);
             return;
           }
 

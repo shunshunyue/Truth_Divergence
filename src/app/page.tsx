@@ -1,28 +1,39 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { FileSearch, Fingerprint, ScanLine, Sparkles } from "lucide-react";
 import { StartInvestigationButton } from "@/components/home/StartInvestigationButton";
+import { listHomeHeroCases } from "@/game/cache/caseCache";
+import {
+  homeHeroSidecarSchema,
+  normalizeHomeHeroCopy,
+  pickFallbackHomeHeroCopy,
+  pickFallbackHomeHeroCopyForHints,
+  type HomeHeroCopy,
+} from "@/game/homeHero";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const caseSignals = [
-  { label: "门禁", value: "01:36 补录" },
-  { label: "监控", value: "七分钟黑屏" },
-  { label: "账册", value: "水渍封页" },
-];
+type HomeHeroBundle = {
+  coverSrc: string;
+  heroCopy: HomeHeroCopy;
+};
 
-function getRandomCaseCover() {
+function getLocalHomeHeroBundle(): HomeHeroBundle {
   const casesRoot = path.join(process.cwd(), "public", "generated", "cases");
   const fallbackCover = "/generated/workspace-preview.png";
 
   if (!existsSync(casesRoot)) {
-    return fallbackCover;
+    return {
+      coverSrc: fallbackCover,
+      heroCopy: pickFallbackHomeHeroCopy(fallbackCover),
+    };
   }
 
-  const covers = readdirSync(casesRoot, { withFileTypes: true })
+  const bundles = readdirSync(casesRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
+      const caseDir = path.join(casesRoot, entry.name);
       const coverDir = path.join(casesRoot, entry.name, "case_cover");
 
       if (!existsSync(coverDir)) {
@@ -31,14 +42,107 @@ function getRandomCaseCover() {
 
       return readdirSync(coverDir, { withFileTypes: true })
         .filter((file) => file.isFile() && /^session-case\.(png|jpe?g|webp|svg)$/i.test(file.name))
-        .map((file) => `/generated/cases/${entry.name}/case_cover/${file.name}`);
+        .map((file) => {
+          const coverSrc = `/generated/cases/${entry.name}/case_cover/${file.name}`;
+          const sidecar = readHomeHeroSidecar(path.join(caseDir, "home-hero.json"), coverSrc);
+          const hints = getCaseDirectoryHints(caseDir);
+
+          return {
+            coverSrc,
+            heroCopy: sidecar ?? pickFallbackHomeHeroCopyForHints(hints, entry.name),
+          };
+        });
     });
 
-  return covers.length > 0 ? covers[Math.floor(Math.random() * covers.length)] : fallbackCover;
+  return bundles.length > 0
+    ? bundles[Math.floor(Math.random() * bundles.length)]
+    : {
+        coverSrc: fallbackCover,
+        heroCopy: pickFallbackHomeHeroCopy(fallbackCover),
+      };
 }
 
-export default function Home() {
-  const coverSrc = getRandomCaseCover();
+function getCaseDirectoryHints(caseDir: string) {
+  const hints = [path.basename(caseDir)];
+
+  try {
+    for (const entry of readdirSync(caseDir, { withFileTypes: true })) {
+      hints.push(entry.name);
+      if (!entry.isDirectory()) continue;
+
+      const nestedDir = path.join(caseDir, entry.name);
+      for (const file of readdirSync(nestedDir, { withFileTypes: true })) {
+        if (file.isFile()) hints.push(file.name);
+      }
+    }
+  } catch {
+    return hints;
+  }
+
+  return hints;
+}
+
+function readHomeHeroSidecar(filePath: string, coverSrc: string) {
+  if (!existsSync(filePath)) return null;
+
+  try {
+    const raw = JSON.parse(readFileSync(filePath, "utf8"));
+    const parsed = homeHeroSidecarSchema.omit({ homeHero: true }).parse(raw);
+    if (parsed.coverSrc && parsed.coverSrc !== coverSrc) return null;
+    return normalizeHomeHeroCopy(raw.homeHero, raw.caseData ?? {
+      id: parsed.caseId,
+      title: parsed.caseTitle,
+      theme: parsed.caseTitle,
+      difficulty: "待核验",
+      openingEvent: { headline: parsed.caseTitle, brief: parsed.caseTitle, initialPrompt: parsed.caseTitle },
+      victim: { id: "victim-home", name: parsed.caseTitle, role: "关键当事人", description: parsed.caseTitle },
+      suspects: [],
+      witnesses: [],
+      locations: [],
+      evidence: [],
+      timeline: [],
+      relationships: [],
+      truth: {
+        killer: "",
+        motive: "",
+        method: "",
+        deathTime: "",
+        keyTimeline: [],
+        keyEvidence: [],
+        falseLeads: [],
+        hiddenRelationships: [],
+        exclusionReasons: {},
+      },
+      scoringRules: { killer: 25, motive: 15, method: 15, timeline: 15, keyEvidence: 10, exclusions: 10, relationships: 5, clarity: 5 },
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function getHomeHeroBundle(): Promise<HomeHeroBundle> {
+  try {
+    const records = await listHomeHeroCases();
+    const bundles = records.flatMap((record) => {
+      const cover = record.visualManifest?.assets.find(
+        (asset) => asset.kind === "case_cover" && asset.status === "ready" && asset.fileUrl,
+      );
+
+      return cover?.fileUrl ? [{ coverSrc: cover.fileUrl, heroCopy: record.homeHero }] : [];
+    });
+
+    if (bundles.length > 0) {
+      return bundles[Math.floor(Math.random() * bundles.length)];
+    }
+  } catch {
+    // 首页不能因为数据库临时不可用而白屏，缓存不可读时直接走本地兜底。
+  }
+
+  return getLocalHomeHeroBundle();
+}
+
+export default async function Home() {
+  const { coverSrc, heroCopy } = await getHomeHeroBundle();
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#ebe4d6] text-[#27241f]">
@@ -66,17 +170,29 @@ export default function Home() {
 
         <div className="td-home-rise td-home-rise-delay flex flex-1 items-center py-12 sm:py-16 lg:py-8">
           <div className="max-w-[58rem]">
-            <p className="font-mono text-xs font-bold uppercase text-[#9d6d21]">
-              雾港冻库停电案
+            <p className="td-home-kicker font-mono text-xs font-bold uppercase text-[#9d6d21]">
+              {heroCopy.caseName}
             </p>
-            <h1 className="mt-4 max-w-[54rem] font-display text-7xl font-black leading-[0.86] text-[#27241f] md:text-8xl xl:text-[9rem]">
-              今天事真多
+            <h1
+              aria-label={heroCopy.headline}
+              className="td-home-headline mt-4 max-w-[54rem] font-display text-7xl font-black leading-[0.86] text-[#27241f] md:text-8xl xl:text-[9rem]"
+            >
+              {Array.from(heroCopy.headline).map((char, index) => (
+                <span
+                  aria-hidden="true"
+                  className="td-home-letter"
+                  key={`${char}-${index}`}
+                  style={{ animationDelay: `${index * 46}ms, ${1400 + index * 120}ms` }}
+                >
+                  {char}
+                </span>
+              ))}
             </h1>
-            <p className="mt-6 max-w-3xl text-2xl font-black leading-tight text-[#27241f] md:text-4xl">
-              十分钟黑暗里，谁补了一条门禁？
+            <p className="td-home-prompt mt-6 max-w-2xl text-2xl font-black leading-tight text-[#27241f] md:text-3xl">
+              {heroCopy.prompt}
             </p>
-            <p className="mt-5 max-w-xl text-base font-semibold leading-7 text-[#4f483d] md:text-lg">
-              你开口追问，AI 把口供、证据和矛盾推到台前。
+            <p className="td-home-note mt-4 max-w-md text-sm font-semibold leading-6 text-[#4f483d] md:text-base">
+              {heroCopy.note}
             </p>
           </div>
         </div>
@@ -85,15 +201,15 @@ export default function Home() {
           <StartInvestigationButton coverSrc={coverSrc} />
 
           <div className="flex flex-wrap items-center gap-2 text-[#fffdf7] lg:justify-end">
-            {caseSignals.map((item, index) => (
+            {heroCopy.signals.map((item, index) => (
               <div
                 key={item.label}
-                className="td-home-signal flex min-h-12 items-center gap-2 border border-[#fffdf7]/58 bg-[#27241f]/34 px-3 shadow-[0_12px_34px_rgba(39,36,31,0.18)] backdrop-blur-md"
+                className="td-home-signal flex min-h-12 w-full max-w-[15rem] items-center gap-2 border border-[#fffdf7]/58 bg-[#27241f]/34 px-3 shadow-[0_12px_34px_rgba(39,36,31,0.18)] backdrop-blur-md sm:w-auto"
                 style={{ animationDelay: `${360 + index * 90}ms` }}
               >
                 {index === 0 ? <Fingerprint size={14} /> : <ScanLine size={14} />}
-                <span className="font-mono text-[0.62rem] text-[#fffdf7]/62">{item.label}</span>
-                <span className="text-xs font-bold text-[#fffdf7]">{item.value}</span>
+                <span className="shrink-0 font-mono text-[0.62rem] text-[#fffdf7]/62">{item.label}</span>
+                <span className="min-w-0 truncate text-xs font-bold text-[#fffdf7]">{item.value}</span>
               </div>
             ))}
           </div>

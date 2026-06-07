@@ -1,4 +1,4 @@
-import { CheckCircle2, FileText, Gauge, Loader2, Map, MessageSquareText, Radar, Search, Sparkles } from "lucide-react";
+import { CheckCircle2, FileText, Gauge, Loader2, Map, MessageSquareText, Radar, Search, Sparkles, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { bootSteps, type BootStepId } from "@/components/investigation/types";
 
@@ -14,11 +14,13 @@ const bootIcons = {
 export function BootConsole({
   activeStep,
   error,
+  onCancel,
   progress,
   status,
 }: {
   activeStep: BootStepId;
   error: string;
+  onCancel?: () => void;
   progress: number;
   status: string;
 }) {
@@ -36,9 +38,22 @@ export function BootConsole({
           <p className="font-mono text-xs text-[#24615b]">初始化操作台</p>
           <h2 className="mt-2 font-display text-4xl font-black leading-none text-[#27241f]">案件正在接入</h2>
         </div>
-        <motion.span animate={{ rotate: 360 }} transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}>
-          <Loader2 className="text-[#24615b]" size={22} />
-        </motion.span>
+        <div className="flex shrink-0 items-center gap-2">
+          {onCancel && (
+            <button
+              aria-label="取消接入并返回首页"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-[#d8cfba] bg-[#fffdf7]/78 px-3 font-mono text-xs font-bold text-[#675d4f] shadow-sm transition hover:border-[#a64e3b] hover:bg-[#fff0ea] hover:text-[#a64e3b]"
+              onClick={onCancel}
+              type="button"
+            >
+              <X size={14} />
+              <span className="hidden sm:inline">取消接入</span>
+            </button>
+          )}
+          <motion.span animate={{ rotate: 360 }} transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}>
+            <Loader2 className="text-[#24615b]" size={22} />
+          </motion.span>
+        </div>
       </div>
 
       <div className="td-scanline mt-6 h-2 bg-[#d8cfba]">

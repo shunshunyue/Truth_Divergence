@@ -19,6 +19,7 @@ export function InvestigationClient() {
   const [relationshipOpen, setRelationshipOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [exitPrompt, setExitPrompt] = useState<"manual" | "solved" | null>(null);
+  const [isLeaving, setIsLeaving] = useState(false);
   const solvedPromptedSessionRef = useRef<string | null>(null);
 
   const investigation = useInvestigationSession();
@@ -37,15 +38,36 @@ export function InvestigationClient() {
     if (accepted) setInput("");
   }
 
-  function confirmExitCase() {
+  function leaveCase() {
+    setIsLeaving(true);
+    setExitPrompt(null);
     investigation.discardSession();
-    router.push("/");
+    router.replace("/");
+  }
+
+  function confirmExitCase() {
+    leaveCase();
+  }
+
+  function cancelBoot() {
+    leaveCase();
+  }
+
+  async function enterInvestigation() {
+    return investigation.activateSession();
   }
 
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#d9d2c4] text-[#27241f]">
-      {session && investigation.showBriefing ? (
-        <BriefingScreen session={session} onClose={() => investigation.setShowBriefing(false)} />
+      {isLeaving ? (
+        <div className="grid min-h-0 flex-1 place-items-center bg-[#f4f0e7] p-6 text-center">
+          <div>
+            <p className="font-mono text-xs font-bold text-[#24615b]">returning home</p>
+            <p className="mt-2 text-lg font-black text-[#27241f]">正在返回首页...</p>
+          </div>
+        </div>
+      ) : session && investigation.showBriefing ? (
+        <BriefingScreen session={session} onClose={enterInvestigation} />
       ) : (
       <div className="td-case-shell m-2 grid min-h-0 flex-1 grid-cols-[3.25rem_minmax(0,1fr)] overflow-hidden rounded-lg border border-[#c8bda7]">
         {/* Left drawer */}
@@ -86,7 +108,7 @@ export function InvestigationClient() {
           visualFocus={investigation.visualFocus}
           visualManifest={investigation.session?.visualManifest}
           onCommand={submitCommand}
-          onRequestExit={() => setExitPrompt("manual")}
+          onRequestExit={investigation.isBooting ? cancelBoot : () => setExitPrompt("manual")}
         />
       </div>
       )}

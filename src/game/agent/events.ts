@@ -20,6 +20,7 @@ export type ChatMessagePayload = {
 
 export type AgentSessionPayload = {
   sessionId: string;
+  activatedAt?: string;
   caseData: CaseData;
   state: PlayerCaseState;
   visualManifest?: CaseVisualManifest;
@@ -206,6 +207,10 @@ export type AgentClientMessage =
   | {
       type: "session.resume";
       roomId?: string;
+      sessionId: string;
+    }
+  | {
+      type: "session.activate";
       sessionId: string;
     }
   | {

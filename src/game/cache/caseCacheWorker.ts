@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
 import { generateInitialSession } from "@/ai/caseGenerator";
 import { generateCaseVisualManifest } from "@/ai/imageGenerator";
 import { countReadyCases, insertFailedCase, insertReadyCase } from "@/game/cache/caseCache";
@@ -64,6 +66,31 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function writeHomeHeroSidecar(cacheId: string, session: Awaited<ReturnType<typeof generateInitialSession>>) {
+  const coverAsset = session.visualManifest?.assets.find((asset) => asset.kind === "case_cover" && asset.fileUrl);
+  const sidecarDir = path.join(process.cwd(), process.env.CASE_VISUALS_DIR ?? "public/generated/cases", cacheId);
+  const sidecarPath = path.join(sidecarDir, "home-hero.json");
+
+  await mkdir(sidecarDir, { recursive: true });
+  await writeFile(
+    sidecarPath,
+    `${JSON.stringify(
+      {
+        version: 1,
+        cacheId,
+        caseId: session.caseData.id,
+        caseTitle: session.caseData.title,
+        coverSrc: coverAsset?.fileUrl,
+        homeHero: session.homeHero,
+        updatedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+}
+
 export async function refillCaseCacheOnce(logger?: CaseCacheWorkerLogger) {
   if (workerState.running) {
     emit(logger, "skip", "上一轮补货还在运行，本轮跳过。");
@@ -121,6 +148,8 @@ export async function refillCaseCacheOnce(logger?: CaseCacheWorkerLogger) {
           theme: session.caseData.theme,
           difficulty: session.caseData.difficulty,
           opening: session.caseData.openingEvent.headline,
+          homeHeadline: session.homeHero.headline,
+          homeSignals: session.homeHero.signals.length,
           locations: session.caseData.locations.length,
           suspects: session.caseData.suspects.length,
           evidence: session.caseData.evidence.length,
@@ -139,6 +168,7 @@ export async function refillCaseCacheOnce(logger?: CaseCacheWorkerLogger) {
           },
         });
         session.visualManifest = visualManifest;
+        await writeHomeHeroSidecar(cacheId, session);
         emit(logger, "visual-complete", "案件视觉资产包生成完成。", {
           cacheId,
           total: visualManifest.assets.length,

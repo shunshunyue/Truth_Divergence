@@ -3,20 +3,34 @@ import { hasAiCredentials, requestAiJsonStream } from "@/ai/client";
 import { caseDataSchema, type CaseData, type PlayerCaseState } from "@/game/schemas/game";
 import type { CaseVisualManifest } from "@/game/schemas/visuals";
 import { createInitialPlayerState } from "@/game/engine/state";
+import { normalizeHomeHeroCopy, type HomeHeroCopy } from "@/game/homeHero";
 
 const generatedSessionSchema = z.object({
   caseData: caseDataSchema,
+  homeHero: z.unknown().optional(),
 });
 
 export type GeneratedSession = {
   caseData: CaseData;
   state: PlayerCaseState;
   visualManifest?: CaseVisualManifest;
+  homeHero: HomeHeroCopy;
 };
 
 function schemaContract() {
   return `必须严格返回这个 JSON 顶层结构：
 {
+  "homeHero": {
+    "caseName": "首页显示的中文案件名，2-18字",
+    "headline": "首页超大标题，2-6字，像封面片名，必须有张力但不能剧透",
+    "prompt": "首页副标题，6-22字，只写一个和开场封面/现场一致的疑问或矛盾",
+    "note": "首页说明，8-26字，只写一个调查动作提示，不要解释玩法",
+    "signals": [
+      {"label":"1-4字线索标签","value":"1-10字线索值"},
+      {"label":"1-4字线索标签","value":"1-10字线索值"},
+      {"label":"1-4字线索标签","value":"1-10字线索值"}
+    ]
+  },
   "caseData": {
     "id": "session-case",
     "title": "中文案件名",
@@ -92,6 +106,10 @@ function generationPrompt() {
 硬性要求：
 - 所有案件内容都由你原创生成。
 - 只返回 JSON 对象。
+- 必须生成 homeHero，给网站首页直接使用；homeHero 必须和 caseData.openingEvent、开局地点、可探索物件、即将生成的案件封面同题材，不要写和案件无关的泛文案。
+- homeHero 不能剧透最终责任人、隐藏关系、完整作案/操作机制或决定性证据，只能制造开场疑问。
+- homeHero 要像海报文字，不要像剧情简介：headline 2-6 字；prompt 不超过 22 字；note 不超过 26 字；signals.value 不超过 10 字。
+- homeHero.prompt 只保留一个强钩子，不要写完整案情经过；homeHero.note 不要出现“AI”“梳理口供、证据和矛盾”等解释性长句。
 - 不要把事件默认写成凶杀案、命案、尸体现场或死者调查。题材可以是事故、失踪、调包、泄密、诈骗、舞弊、破坏、诬陷、医疗/校园/社区/公司纠纷、公共设施异常、财务黑洞等；核心是“事情合理、有证据、有矛盾、有责任链”。
 - 可以有受伤、死亡或犯罪，但只能在题材自然需要时出现，不能作为固定模板；不要血腥猎奇。
 - 必须完全符合下面的字段契约，不能增加 age 到 victim，不能把 victim 写成 suspect 格式，不能漏 role/description。
@@ -189,5 +207,6 @@ export async function generateInitialSession(
   return {
     caseData: parsed.caseData,
     state,
+    homeHero: normalizeHomeHeroCopy(parsed.homeHero, parsed.caseData),
   };
 }

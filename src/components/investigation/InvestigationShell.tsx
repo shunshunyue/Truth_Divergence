@@ -1182,7 +1182,7 @@ export function CenterStage({
     element.scrollTop = element.scrollHeight;
   }, [chatMessages]);
 
-  const statusText = isActing ? "正在生成回答" : chatMode.mode === "interrogation" ? "问询接入" : "案件助手在线";
+  const statusText = isActing ? "正在生成回答" : chatMode.mode === "interrogation" ? "问询接入" : "中枢在线";
   const isInterrogation = chatMode.mode === "interrogation";
 
   return (
@@ -1195,36 +1195,43 @@ export function CenterStage({
     >
       {isBooting ? (
         <div className="td-scrollbar h-full overflow-y-auto bg-[#f4f0e7] p-5">
-          <BootConsole activeStep={activeStep} error={bootError} progress={bootProgress} status={bootStatus} />
+          <BootConsole
+            activeStep={activeStep}
+            error={bootError}
+            onCancel={onRequestExit}
+            progress={bootProgress}
+            status={bootStatus}
+          />
         </div>
       ) : (
-        <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#f6f2ea] text-[#27241f]">
+        <div className={["td-desk-stage relative flex h-full min-h-0 flex-col overflow-hidden text-[#27241f]", isInterrogation ? "td-desk-stage-interrogation" : ""].join(" ")}>
+          <div className="td-desk-grain pointer-events-none absolute inset-0 z-0" />
+          <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_50%_18%,rgba(255,253,247,0.74),transparent_34rem),radial-gradient(circle_at_12%_88%,rgba(36,97,91,0.13),transparent_28rem),radial-gradient(circle_at_92%_42%,rgba(157,109,33,0.16),transparent_30rem)]" />
           <motion.div
-            className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(39,36,31,0.42)_1px,transparent_1px),linear-gradient(90deg,rgba(39,36,31,0.42)_1px,transparent_1px)]"
+            className="pointer-events-none absolute inset-0 z-0 [background-image:linear-gradient(rgba(39,36,31,0.2)_1px,transparent_1px),linear-gradient(90deg,rgba(39,36,31,0.16)_1px,transparent_1px)]"
             animate={{
-              opacity: isInterrogation ? 0.12 : 0.08,
-              backgroundSize: isInterrogation ? "24px 24px" : "28px 28px",
+              opacity: isInterrogation ? 0.16 : 0.1,
+              backgroundSize: isInterrogation ? "23px 23px" : "31px 31px",
             }}
             transition={{ duration: 0.34 }}
           />
           <motion.div
-            className="pointer-events-none absolute inset-x-0 top-0 h-32"
+            className="pointer-events-none absolute inset-x-0 top-0 z-0 h-36"
             animate={{
               background: isInterrogation
-                ? "linear-gradient(180deg,rgba(197,83,61,0.17),transparent)"
-                : "linear-gradient(180deg,rgba(111,213,199,0.18),transparent)",
+                ? "linear-gradient(180deg,rgba(197,83,61,0.22),transparent)"
+                : "linear-gradient(180deg,rgba(111,213,199,0.2),transparent)",
             }}
             transition={{ duration: 0.3 }}
           />
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-10 bg-[linear-gradient(90deg,rgba(36,97,91,0.1),transparent)]" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-[linear-gradient(270deg,rgba(80,69,52,0.1),transparent)]" />
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-0 w-16 bg-[linear-gradient(90deg,rgba(20,59,55,0.16),transparent)]" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-0 w-16 bg-[linear-gradient(270deg,rgba(80,69,52,0.16),transparent)]" />
+          <div className="pointer-events-none absolute inset-0 z-0 shadow-[inset_0_0_90px_rgba(47,42,34,0.14)]" />
           {currentLocation && (
             <div className="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
-              <div className="absolute left-[8%] top-[22%] max-w-5xl select-none font-display text-7xl font-black leading-none text-[#24615b]/[0.045] md:text-8xl lg:text-9xl">
+              <div className="absolute right-[7%] top-[18%] hidden h-44 w-64 rotate-[-8deg] border border-[#24615b]/10 bg-[linear-gradient(135deg,rgba(36,97,91,0.08),transparent_48%,rgba(157,109,33,0.08))] sm:block" />
+              <div className="absolute left-[7%] top-[20%] max-w-5xl select-none font-display text-6xl font-black leading-none text-[#143b37]/[0.055] sm:text-7xl md:text-8xl lg:text-9xl">
                 {currentLocation.name}
-              </div>
-              <div className="absolute bottom-[18%] left-[18%] hidden font-mono text-[0.62rem] uppercase tracking-[0.42em] text-[#9d6d21]/25 md:block">
-                field note / active scene
               </div>
             </div>
           )}
@@ -1287,8 +1294,8 @@ export function CenterStage({
             </div>
           </motion.div>
 
-          <div ref={chatScrollRef} className="td-scrollbar relative z-10 min-h-0 flex-1 overflow-y-auto px-4 pb-36 pt-7 sm:px-6 lg:px-8">
-            <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-4">
+          <div ref={chatScrollRef} className="td-scrollbar relative z-10 min-h-0 flex-1 overflow-y-auto px-4 pb-48 pt-7 sm:px-6 lg:px-8">
+            <div className="td-case-feed mx-auto flex w-full max-w-[58rem] flex-col gap-4">
               <VisualStage
                 chatMode={chatMode}
                 currentLocation={currentLocation}
@@ -1296,18 +1303,44 @@ export function CenterStage({
                 manifest={visualManifest}
               />
               {chatMessages.length === 0 && (
-                <div className="rounded-lg border border-l-4 border-[#d8cfba] border-l-[#24615b] bg-[#fffdf7]/82 p-5 shadow-[0_18px_60px_rgba(49,40,28,0.1)] backdrop-blur-sm">
-                  <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#24615b]">现场记录</p>
-                  <p className="mt-3 text-sm leading-6 text-[#625a4d]">
+                <motion.div
+                  className="td-field-note relative overflow-hidden border border-[#d8cfba] bg-[#fffdf7]/86 p-5 shadow-[0_22px_70px_rgba(49,40,28,0.13)] backdrop-blur-sm sm:p-6"
+                  initial={{ opacity: 0, y: 8, rotate: -0.4 }}
+                  animate={{ opacity: 1, y: 0, rotate: -0.4 }}
+                  transition={{ duration: 0.24, ease: "easeOut" }}
+                >
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="font-mono text-[0.62rem] uppercase tracking-[0.2em] text-[#24615b]">field note / 001</p>
+                      <h2 className="mt-1 font-display text-2xl font-black leading-none text-[#27241f] sm:text-3xl">
+                        {currentLocation?.name ?? "案发现场"}
+                      </h2>
+                    </div>
+                    <span className="td-stamp rotate-[5deg] border-[#cfa65b] bg-[#fff8e8]/76 px-2 py-1 text-[#9d6d21]">
+                      active
+                    </span>
+                  </div>
+                  <p className="max-w-3xl text-sm leading-7 text-[#625a4d]">
                     我先把现场压一下：现在人在{currentLocation?.name ?? "案发现场"}。
                     {currentLocation?.description ?? "门禁、监控、值班记录和现场物件会是第一批能撬开的口子。"}
                     你可以直接问要查哪一项，也可以从左侧线索进去看。
                   </p>
-                </div>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <span className="rounded-sm border border-[#b8d8d2] bg-[#e8f6f2]/72 px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-[#24615b]">
+                      scene locked
+                    </span>
+                    <span className="rounded-sm border border-[#d8cfba] bg-[#f4efe5]/82 px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-[#675d4f]">
+                      archive ready
+                    </span>
+                  </div>
+                </motion.div>
               )}
               {chatMessages.map((message) => {
                 const isUser = message.speaker === "user";
                 const isSuspect = message.speaker === "suspect";
+                const isSystem = message.speaker === "system";
+                const messageTone = isUser ? "user" : isSuspect ? "suspect" : isSystem ? "system" : "assistant";
+                const speakerLabel = message.label ?? (isUser ? "你的行动" : isSuspect ? "问询转录" : isSystem ? "系统记录" : "案件分析");
                 return (
                   <motion.div
                     key={message.id}
@@ -1316,30 +1349,43 @@ export function CenterStage({
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.16 }}
                   >
-                    <div className={["flex max-w-[82%] flex-col gap-2", isUser ? "items-end" : "items-start"].join(" ")}>
+                    <div className={["flex max-w-[86%] flex-col gap-2 sm:max-w-[78%]", isUser ? "items-end" : "items-start"].join(" ")}>
                       <div
                         className={[
-                          "w-full border px-4 py-3 shadow-[0_14px_40px_rgba(49,40,28,0.1)] backdrop-blur-sm",
+                          "td-message-card relative w-full overflow-hidden border px-4 py-3 shadow-[0_16px_44px_rgba(49,40,28,0.12)] backdrop-blur-sm",
                           isUser
-                            ? "rounded-lg border-[#cfa65b] bg-[#fff5db]/88 text-[#2f2618]"
+                            ? "td-message-user rounded-md border-[#cfa65b] bg-[#fff4d4]/90 text-[#2f2618]"
                             : isSuspect
-                              ? "rounded-lg border-[#b86956] bg-[#fff0ea]/88 text-[#35201a]"
-                              : "rounded-md border-[#b8d8d2] border-l-4 border-l-[#24615b] bg-[#fffdf7]/78 text-[#1f2927]",
+                              ? "td-message-suspect rounded-md border-[#b86956] bg-[#fff0ea]/90 text-[#35201a]"
+                              : isSystem
+                                ? "td-message-system rounded-md border-[#c8bda7] bg-[#f7f2e8]/88 text-[#4b4338]"
+                                : "td-message-assistant rounded-md border-[#b8d8d2] bg-[#fffdf7]/84 text-[#1f2927]",
                         ].join(" ")}
                       >
                         <div className="mb-2 flex items-center justify-between gap-3">
-                          <span className={["font-mono text-[0.6rem] uppercase tracking-[0.16em]", isUser ? "text-[#9d6d21]" : isSuspect ? "text-[#a64e3b]" : "text-[#24615b]"].join(" ")}>
-                            {message.label ?? (isUser ? "你" : isSuspect ? "问询对象" : "案件 AI 助手")}
+                          <span className={["flex min-w-0 items-center gap-2 font-mono text-[0.58rem] uppercase tracking-[0.16em]", isUser ? "text-[#9d6d21]" : isSuspect ? "text-[#a64e3b]" : isSystem ? "text-[#8b8171]" : "text-[#24615b]"].join(" ")}>
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-75" />
+                            <span className="line-clamp-1">{speakerLabel}</span>
                           </span>
-                          {message.pending && (
-                            <span className="flex items-center gap-1 text-[#8b8171]" aria-label="typing">
-                              <span className="td-typing-dot" />
-                              <span className="td-typing-dot" />
-                              <span className="td-typing-dot" />
+                          <span className="flex shrink-0 items-center gap-2">
+                            {isSuspect && (
+                              <span className="hidden rounded-sm border border-[#d0a092] bg-[#fff7f3] px-1.5 py-0.5 font-mono text-[0.52rem] font-bold uppercase tracking-[0.12em] text-[#a64e3b] sm:inline-flex">
+                                rec
+                              </span>
+                            )}
+                            <span className="font-mono text-[0.52rem] uppercase tracking-[0.14em] text-[#9b9180]">
+                              {messageTone}
                             </span>
-                          )}
+                            {message.pending && (
+                              <span className="flex items-center gap-1 text-[#8b8171]" aria-label="typing">
+                                <span className="td-typing-dot" />
+                                <span className="td-typing-dot" />
+                                <span className="td-typing-dot" />
+                              </span>
+                            )}
+                          </span>
                         </div>
-                        <p className="whitespace-pre-wrap text-sm leading-6">{message.text || "..."}</p>
+                        <p className="relative z-[1] whitespace-pre-wrap text-sm leading-6">{message.text || "..."}</p>
                       </div>
                       {message.attachments?.length ? (
                         <div className="w-full">
@@ -1400,19 +1446,19 @@ export function CenterStage({
         <div className="absolute bottom-4 left-1/2 z-20 w-[min(860px,calc(100%-2rem))] -translate-x-1/2">
           <motion.div
             className={[
-              "rounded-lg border border-[#cfc4ad] bg-[#fffdf7]/96 shadow-[0_18px_64px_rgba(36,30,22,0.2)] backdrop-blur",
+              "relative border border-[#cfc4ad] bg-[#fffdf7]/96 shadow-[0_18px_64px_rgba(36,30,22,0.2)] backdrop-blur",
+              cmdExpanded && recommendedCommands.length > 0 ? "rounded-b-lg rounded-t-none" : "rounded-lg",
               isActing ? "td-scanline" : "",
             ].join(" ")}
-            animate={{ height: cmdExpanded ? "auto" : undefined }}
           >
             <AnimatePresence initial={false}>
               {cmdExpanded && recommendedCommands.length > 0 && (
                 <motion.div
-                  className="flex gap-2 overflow-x-auto px-3 pb-0 pt-3"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.15 }}
+                  className="absolute bottom-[calc(100%-1px)] left-[-1px] right-[-1px] flex gap-2 overflow-x-auto rounded-t-lg border border-b-0 border-[#cfc4ad] bg-[#fffdf7]/96 px-3 py-2 backdrop-blur"
+                  initial={{ opacity: 0, y: 7 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 7 }}
+                  transition={{ duration: 0.14, ease: "easeOut" }}
                 >
                   {recommendedCommands.map((cmd) => (
                     <motion.button

@@ -9,6 +9,7 @@
     "start": "tsx -r tsconfig-paths/register server.ts --prod",
     "cache:worker": "tsx -r tsconfig-paths/register scripts/case-cache-worker.ts",
     "cache:visuals": "tsx -r tsconfig-paths/register scripts/case-visual-backfill.ts",
+    "home:hero:backfill": "tsx -r tsconfig-paths/register scripts/home-hero-backfill.ts",
     "image:smoke": "tsx -r tsconfig-paths/register scripts/image-smoke.ts",
     "typecheck": "tsc --noEmit"
   },

@@ -13,6 +13,8 @@ export type SessionChatMessage = {
 
 export type GameSession = {
   sessionId: string;
+  cacheRecordId?: string;
+  activatedAt?: string;
   caseData: CaseData;
   state: PlayerCaseState;
   visualManifest?: CaseVisualManifest;

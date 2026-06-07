@@ -22,6 +22,14 @@ import type { CaseVisualManifest, VisualAsset } from "@/game/schemas/visuals";
 
 const persistedInvestigationKey = "td-investigation-save-v1";
 const legacySessionKey = "td-session";
+const chatStreamTickMs = 26;
+const chatStreamChunkSize = 3;
+
+type ChatStreamBuffer = {
+  finalMessage?: InvestigationChatMessage;
+  queue: string;
+  timer?: number;
+};
 
 const simulatedBootTimeline: Array<{ step: BootStepId; progress: number; status: string; delay: number }> = [
   { step: "core", progress: 18, status: "缓存命中，正在核对案件核心...", delay: 180 },
@@ -60,7 +68,8 @@ function isSessionPayload(value: unknown): value is SessionPayload {
     typeof candidate.sessionId === "string" &&
     Boolean(candidate.sessionId) &&
     Boolean(candidate.caseData) &&
-    Boolean(candidate.state)
+    Boolean(candidate.state) &&
+    (typeof candidate.activatedAt === "undefined" || typeof candidate.activatedAt === "string")
   );
 }
 
@@ -105,7 +114,7 @@ function loadPersistedInvestigation(): PersistedInvestigationSnapshot | null {
           roomId: parsed.roomId || createRoomId(),
           session: parsed.session,
           chatMessages: reviveChatMessages(parsed.chatMessages),
-          chatMode: isChatMode(parsed.chatMode) ? parsed.chatMode : { mode: "assistant", label: "案件 AI 助手" },
+          chatMode: isChatMode(parsed.chatMode) ? parsed.chatMode : { mode: "assistant", label: "真相中枢" },
           actionStatus: typeof parsed.actionStatus === "string" ? parsed.actionStatus : "案件进度已恢复。",
           showBriefing: Boolean(parsed.showBriefing),
           visualFocus: parsed.visualFocus ?? null,
@@ -123,7 +132,7 @@ function loadPersistedInvestigation(): PersistedInvestigationSnapshot | null {
           roomId: createRoomId(),
           session: legacySession,
           chatMessages: [],
-          chatMode: { mode: "assistant", label: "案件 AI 助手" },
+          chatMode: { mode: "assistant", label: "真相中枢" },
           actionStatus: "已恢复旧版案件进度。",
           showBriefing: false,
           visualFocus: null,
@@ -273,13 +282,14 @@ function mergeStatePatch(current: PlayerCaseState, patch: AgentPlayerStatePatch)
 }
 
 export function useInvestigationSession() {
-  const defaultChatMode: ChatModeState = { mode: "assistant", label: "案件 AI 助手" };
+  const defaultChatMode: ChatModeState = { mode: "assistant", label: "真相中枢" };
   const socketRef = useRef<ReturnType<typeof connectAgentSocket> | null>(null);
   const sessionRef = useRef<SessionPayload | null>(null);
   const pendingSessionRef = useRef<SessionPayload | null>(null);
   const bootTimersRef = useRef<number[]>([]);
   const startSentRef = useRef(false);
   const seenEventIdsRef = useRef<Set<string>>(new Set());
+  const chatStreamBuffersRef = useRef<Map<string, ChatStreamBuffer>>(new Map());
   const roomIdRef = useRef(createRoomId());
   const [storageReady, setStorageReady] = useState(false);
   const [session, setSession] = useState<SessionPayload | null>(null);
@@ -415,7 +425,14 @@ export function useInvestigationSession() {
       });
     }
 
-    function appendChatDelta(messageId: string, text: string) {
+    function clearChatStreamBuffers() {
+      for (const buffer of chatStreamBuffersRef.current.values()) {
+        if (buffer.timer) window.clearTimeout(buffer.timer);
+      }
+      chatStreamBuffersRef.current.clear();
+    }
+
+    function updateChatMessageText(messageId: string, text: string) {
       setChatMessages((current) =>
         current.map((item) =>
           item.id === messageId
@@ -429,6 +446,59 @@ export function useInvestigationSession() {
             : item,
         ),
       );
+    }
+
+    function finishBufferedChatMessage(messageId: string) {
+      const buffer = chatStreamBuffersRef.current.get(messageId);
+      const finalMessage = buffer?.finalMessage;
+      if (!finalMessage) return;
+
+      chatStreamBuffersRef.current.delete(messageId);
+      upsertChatMessage(finalMessage);
+      if (finalMessage.speaker === "assistant" || finalMessage.speaker === "suspect") {
+        setIsActing(false);
+      }
+    }
+
+    function pumpChatStream(messageId: string) {
+      const buffer = chatStreamBuffersRef.current.get(messageId);
+      if (!buffer) return;
+
+      if (!buffer.queue) {
+        buffer.timer = undefined;
+        if (buffer.finalMessage) finishBufferedChatMessage(messageId);
+        return;
+      }
+
+      const chunk = buffer.queue.slice(0, chatStreamChunkSize);
+      buffer.queue = buffer.queue.slice(chatStreamChunkSize);
+      updateChatMessageText(messageId, chunk);
+      buffer.timer = window.setTimeout(() => pumpChatStream(messageId), chatStreamTickMs);
+    }
+
+    function appendChatDelta(messageId: string, text: string) {
+      if (!text) return;
+      const buffer = chatStreamBuffersRef.current.get(messageId) ?? { queue: "" };
+      buffer.queue += text;
+      chatStreamBuffersRef.current.set(messageId, buffer);
+      if (!buffer.timer) {
+        buffer.timer = window.setTimeout(() => pumpChatStream(messageId), chatStreamTickMs);
+      }
+    }
+
+    function finishChatMessage(message: InvestigationChatMessage) {
+      const buffer = chatStreamBuffersRef.current.get(message.id);
+      if (!buffer) {
+        upsertChatMessage(message);
+        if (message.speaker === "assistant" || message.speaker === "suspect") {
+          setIsActing(false);
+        }
+        return;
+      }
+
+      buffer.finalMessage = message;
+      chatStreamBuffersRef.current.set(message.id, buffer);
+      if (!buffer.queue && !buffer.timer) finishBufferedChatMessage(message.id);
     }
 
     function attachVisualToChatMessage({
@@ -526,7 +596,7 @@ export function useInvestigationSession() {
         setActionStatus(
           envelope.payload.mode === "interrogation"
             ? `已切换为问询：${envelope.payload.label}`
-            : "已切回案件 AI 助手。",
+            : "已切回真相中枢。",
         );
       }
 
@@ -552,7 +622,7 @@ export function useInvestigationSession() {
       }
 
       if (event === "chat.message.finished") {
-        upsertChatMessage({
+        finishChatMessage({
           id: envelope.payload.messageId,
           turnId: envelope.payload.turnId,
           speaker: envelope.payload.speaker,
@@ -564,9 +634,6 @@ export function useInvestigationSession() {
           clientPending: false,
           createdAt: Date.now(),
         });
-        if (envelope.payload.speaker === "assistant" || envelope.payload.speaker === "suspect") {
-          setIsActing(false);
-        }
       }
 
       if (event === "chat.attachment.added") {
@@ -677,6 +744,7 @@ export function useInvestigationSession() {
     return () => {
       cancelled = true;
       clearBootTimers();
+      clearChatStreamBuffers();
       socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
@@ -766,7 +834,7 @@ export function useInvestigationSession() {
           turnId: localTurnId,
           speaker: "assistant" as const,
           text: "正在调查...",
-          label: chatMode.mode === "interrogation" ? chatMode.label : "案件 AI 助手",
+          label: chatMode.mode === "interrogation" ? chatMode.label : "真相中枢",
           suspectId: chatMode.mode === "interrogation" ? chatMode.suspectId : undefined,
           pending: true,
           placeholder: true,
@@ -796,8 +864,40 @@ export function useInvestigationSession() {
     }
   }
 
+  async function activateSession() {
+    const currentSession = sessionRef.current ?? session;
+    if (!currentSession) return false;
+
+    if (currentSession.activatedAt) {
+      setShowBriefing(false);
+      return true;
+    }
+
+    try {
+      const socket = socketRef.current;
+      if (!socket?.isOpen()) {
+        throw new Error("Investigation Agent WebSocket 未连接，请确认使用 npm run dev 启动。");
+      }
+
+      socket.send({
+        type: "session.activate",
+        sessionId: currentSession.sessionId,
+      });
+      setActionStatus("正在进入调查...");
+      setShowBriefing(false);
+      return true;
+    } catch (error) {
+      setActionStatus(error instanceof Error ? error.message : "进入调查失败。");
+      return false;
+    }
+  }
+
   function discardSession() {
     clearPersistedInvestigation();
+    for (const buffer of chatStreamBuffersRef.current.values()) {
+      if (buffer.timer) window.clearTimeout(buffer.timer);
+    }
+    chatStreamBuffersRef.current.clear();
     pendingSessionRef.current = null;
     sessionRef.current = null;
     startSentRef.current = true;
@@ -829,6 +929,7 @@ export function useInvestigationSession() {
     dismissVisualNotice: () => setCompletedVisualAsset(null),
     discardSession,
     visualFocus,
+    activateSession,
     submitCommand,
   };
 }
