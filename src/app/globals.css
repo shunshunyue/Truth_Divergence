@@ -36,6 +36,75 @@ body {
   font-family: Aptos, "Segoe UI", sans-serif;
 }
 
+.td-route-stack {
+  isolation: isolate;
+  min-height: 100dvh;
+  position: relative;
+}
+
+.td-route-page {
+  min-height: 100dvh;
+  transform-origin: center;
+  will-change: filter, opacity, transform;
+}
+
+.td-route-veil {
+  background:
+    linear-gradient(115deg, #143b37 0%, #1d514c 42%, #27241f 100%),
+    #143b37;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  z-index: 1200;
+}
+
+.td-route-veil-grid {
+  background:
+    linear-gradient(rgba(234, 255, 251, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(234, 255, 251, 0.08) 1px, transparent 1px);
+  background-size: 34px 34px;
+  inset: 0;
+  opacity: 0.28;
+  position: absolute;
+}
+
+.td-route-veil-scan {
+  animation: td-route-scan 920ms cubic-bezier(0.2, 0.72, 0.17, 1) infinite;
+  background: linear-gradient(90deg, transparent, rgba(111, 213, 199, 0.34), rgba(231, 240, 95, 0.22), transparent);
+  bottom: -20%;
+  left: -35%;
+  position: absolute;
+  top: -20%;
+  transform: skewX(-17deg);
+  width: 28%;
+}
+
+.td-route-veil-mark {
+  border-left: 2px solid rgba(231, 240, 95, 0.64);
+  bottom: clamp(1.2rem, 4vw, 3rem);
+  color: #eafffb;
+  display: grid;
+  gap: 0.35rem;
+  left: clamp(1.2rem, 4vw, 3rem);
+  padding-left: 0.9rem;
+  position: absolute;
+  text-transform: uppercase;
+}
+
+.td-route-veil-mark span {
+  color: rgba(234, 255, 251, 0.62);
+  font-family: Cascadia Mono, Consolas, monospace;
+  font-size: 0.62rem;
+  font-weight: 900;
+}
+
+.td-route-veil-mark strong {
+  font-size: clamp(1.2rem, 3vw, 2.7rem);
+  font-weight: 1000;
+  line-height: 1;
+}
+
 .td-case-shell {
   background:
     linear-gradient(90deg, rgba(22, 60, 58, 0.16), transparent 9rem),
@@ -611,6 +680,20 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes td-route-scan {
+  from {
+    opacity: 0;
+    transform: translateX(0) skewX(-17deg);
+  }
+  28% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(520%) skewX(-17deg);
   }
 }
 

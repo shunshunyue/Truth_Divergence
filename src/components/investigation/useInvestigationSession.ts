@@ -32,14 +32,16 @@ type ChatStreamBuffer = {
 };
 
 const simulatedBootTimeline: Array<{ step: BootStepId; progress: number; status: string; delay: number }> = [
-  { step: "core", progress: 18, status: "缓存命中，正在核对案件核心...", delay: 180 },
-  { step: "scene", progress: 34, status: "正在装配初始现场和可调查区域...", delay: 360 },
-  { step: "clues", progress: 50, status: "正在展开现场线索入口...", delay: 560 },
-  { step: "evidence", progress: 66, status: "正在同步证据索引和解锁条件...", delay: 780 },
-  { step: "agent", progress: 82, status: "正在接入问询路由和评分循环...", delay: 1040 },
-  { step: "chat", progress: 96, status: "正在接通案件问答中枢...", delay: 1320 },
-  { step: "chat", progress: 100, status: "案件领取完毕。", delay: 1640 },
+  { step: "core", progress: 18, status: "缓存命中，正在核对案件核心...", delay: 260 },
+  { step: "scene", progress: 34, status: "正在装配初始现场和可调查区域...", delay: 720 },
+  { step: "clues", progress: 50, status: "正在展开现场线索入口...", delay: 1180 },
+  { step: "evidence", progress: 66, status: "正在同步证据索引和解锁条件...", delay: 1680 },
+  { step: "agent", progress: 82, status: "正在接入问询路由和评分循环...", delay: 2220 },
+  { step: "chat", progress: 96, status: "正在接通案件问答中枢...", delay: 2820 },
+  { step: "chat", progress: 100, status: "案件领取完毕，正在校准卷宗画面...", delay: 3420 },
 ];
+
+const bootCompletionHoldMs = 780;
 
 type PersistedInvestigationSnapshot = {
   version: 1;
@@ -370,7 +372,10 @@ export function useInvestigationSession() {
           });
           setBootProgress((current) => Math.max(current, item.progress));
           setBootStatus(item.status);
-          if (item.progress === 100) releasePendingSession();
+          if (item.progress === 100) {
+            const releaseTimer = window.setTimeout(releasePendingSession, bootCompletionHoldMs);
+            bootTimersRef.current.push(releaseTimer);
+          }
         }, item.delay);
         bootTimersRef.current.push(timer);
       }

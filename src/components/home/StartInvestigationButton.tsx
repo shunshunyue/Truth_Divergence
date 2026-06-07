@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
 import { ArrowRight, Play, RotateCcw, X } from "lucide-react";
+import { useRouteTransition } from "@/components/navigation/useRouteTransition";
 
 type StartInvestigationButtonProps = {
   coverSrc: string;
@@ -82,7 +82,7 @@ function formatSavedAt(savedAt?: number) {
 }
 
 export function StartInvestigationButton({ coverSrc }: StartInvestigationButtonProps) {
-  const router = useRouter();
+  const router = useRouteTransition();
   const [pendingSave, setPendingSave] = useState<SavedInvestigationSummary | null>(null);
   const [portalReady, setPortalReady] = useState(false);
 

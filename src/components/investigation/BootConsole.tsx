@@ -31,7 +31,7 @@ export function BootConsole({
       className="min-h-[36rem] rounded-xl border border-[#d8cfba] bg-[#fffdf7]/90 p-5 shadow-[0_18px_60px_rgba(49,40,28,0.14)]"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.28, ease: "easeOut" }}
+      transition={{ duration: 0.52, ease: [0.2, 0.72, 0.17, 1] }}
     >
       <div className="flex items-center justify-between gap-4">
         <div>
@@ -50,7 +50,7 @@ export function BootConsole({
               <span className="hidden sm:inline">取消接入</span>
             </button>
           )}
-          <motion.span animate={{ rotate: 360 }} transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}>
+          <motion.span animate={{ rotate: 360 }} transition={{ duration: 1.9, repeat: Infinity, ease: "linear" }}>
             <Loader2 className="text-[#24615b]" size={22} />
           </motion.span>
         </div>
@@ -61,7 +61,7 @@ export function BootConsole({
           className="h-full bg-[#24615b]"
           initial={false}
           animate={{ width: `${progress}%` }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
+          transition={{ duration: 0.82, ease: [0.2, 0.72, 0.17, 1] }}
         />
       </div>
       <p className="mt-3 text-sm leading-6 text-[#625a4d]">{error || status}</p>
@@ -85,7 +85,7 @@ export function BootConsole({
               ].join(" ")}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.045, duration: 0.22 }}
+              transition={{ delay: index * 0.08, duration: 0.42, ease: [0.2, 0.72, 0.17, 1] }}
             >
               <div className="flex items-start justify-between gap-3">
                 <Icon className={done ? "text-[#9d6d21]" : active ? "text-[#24615b]" : "text-[#81796b]"} size={24} />
@@ -94,7 +94,7 @@ export function BootConsole({
                     <CheckCircle2 size={16} className="text-[#9d6d21]" />
                   </motion.span>
                 ) : active ? (
-                  <motion.span animate={{ scale: [1, 1.18, 1] }} transition={{ duration: 1, repeat: Infinity }}>
+                  <motion.span animate={{ scale: [1, 1.14, 1] }} transition={{ duration: 1.35, repeat: Infinity }}>
                     <Sparkles size={16} className="text-[#24615b]" />
                   </motion.span>
                 ) : null}
