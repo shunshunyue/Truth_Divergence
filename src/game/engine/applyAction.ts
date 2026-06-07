@@ -3,6 +3,7 @@ import type {
   ActionResult,
   CaseData,
   Evidence,
+  FinalDeduction,
   LocationData,
   ParsedAction,
   PlayerCaseState,
@@ -169,6 +170,103 @@ function applyUseEvidence(caseData: CaseData, state: PlayerCaseState, action: Pa
   return `已用「${evidence.title}」追问 ${suspect.name}。矛盾压力上升。`;
 }
 
+function normalizeMatchText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[\s"'“”‘’《》<>【】[\]（）()，,。.:：;；、_\-]/g, "");
+}
+
+function meaningfulTerms(text: string) {
+  return Array.from(
+    new Set(
+      text
+        .split(/[，。！？；;、\s/|]+/)
+        .map((term) => normalizeMatchText(term))
+        .filter((term) => term.length >= 2),
+    ),
+  );
+}
+
+function textMatchesTruth(input: string, truthText: string) {
+  const normalizedInput = normalizeMatchText(input);
+  const normalizedTruth = normalizeMatchText(truthText);
+  if (!normalizedTruth) return false;
+  if (normalizedInput.includes(normalizedTruth) || normalizedTruth.includes(normalizedInput)) return true;
+
+  const terms = meaningfulTerms(truthText);
+  if (!terms.length) return false;
+  const hits = terms.filter((term) => normalizedInput.includes(term)).length;
+  return hits >= Math.min(2, terms.length);
+}
+
+function submittedSuspect(input: string, caseData: CaseData) {
+  const normalizedInput = normalizeMatchText(input);
+  return caseData.suspects.find((suspect) =>
+    [suspect.id, suspect.name, suspect.identity].some((value) => normalizedInput.includes(normalizeMatchText(value))),
+  );
+}
+
+function knownEvidenceCount(caseData: CaseData, state: PlayerCaseState) {
+  const discovered = new Set(state.discoveredEvidence);
+  const discoveredKeyEvidence = caseData.truth.keyEvidence.filter((evidenceId) => discovered.has(evidenceId)).length;
+  return Math.max(discoveredKeyEvidence, state.discoveredEvidence.length);
+}
+
+function buildFinalDeduction(input: string, caseData: CaseData, state: PlayerCaseState, solved: boolean): FinalDeduction {
+  const suspect = submittedSuspect(input, caseData);
+
+  return {
+    killer: suspect?.id ?? "",
+    motive: solved ? caseData.truth.motive : "",
+    method: solved ? caseData.truth.method : "",
+    timeline: state.playerTimeline.map((event) => event.id),
+    keyEvidence: state.discoveredEvidence.filter((evidenceId) =>
+      solved ? caseData.truth.keyEvidence.includes(evidenceId) : true,
+    ),
+    exclusions: solved ? caseData.truth.exclusionReasons : {},
+    report: input,
+  };
+}
+
+function evaluateFinalSubmission(input: string, caseData: CaseData, state: PlayerCaseState) {
+  const suspect = submittedSuspect(input, caseData);
+  const killerCorrect = Boolean(suspect && suspect.id === caseData.truth.killer);
+  const motiveMatched = textMatchesTruth(input, caseData.truth.motive);
+  const methodMatched = textMatchesTruth(input, caseData.truth.method);
+  const timeMatched = textMatchesTruth(input, caseData.truth.deathTime);
+  const preSubmitEvaluation = evaluateAgentLoop(caseData, state);
+  const evidenceCount = knownEvidenceCount(caseData, state);
+  const hasEnoughProgress = preSubmitEvaluation.truthScore >= 70 || evidenceCount >= 5 || state.playerTimeline.length >= 4;
+  const hasDetailedAnswer = motiveMatched || methodMatched || timeMatched;
+  const solved = killerCorrect && (hasEnoughProgress || hasDetailedAnswer);
+  const score = solved
+    ? 100
+    : Math.min(
+        95,
+        Math.max(
+          preSubmitEvaluation.truthScore,
+          (killerCorrect ? 40 : 0) +
+            (motiveMatched ? 18 : 0) +
+            (methodMatched ? 18 : 0) +
+            (timeMatched ? 10 : 0) +
+            Math.min(14, evidenceCount * 2),
+        ),
+      );
+
+  return {
+    evidenceCount,
+    hasDetailedAnswer,
+    hasEnoughProgress,
+    killerCorrect,
+    methodMatched,
+    motiveMatched,
+    score,
+    solved,
+    submittedName: suspect?.name,
+    timeMatched,
+  };
+}
+
 export function applyAction(input: string, caseData: CaseData, previousState: PlayerCaseState): ActionResult {
   const state = cloneState(previousState);
   const parsedAction = parseAction(input, caseData);
@@ -178,6 +276,7 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
   let resultText = "";
   let directlyUnlockedSuspects: SuspectProfile[] = [];
   let directlyUnlockedLocations: LocationData[] = [];
+  let finalSubmission: ReturnType<typeof evaluateFinalSubmission> | undefined;
 
   switch (parsedAction.intent) {
     // 所有玩家自然语言最终都落到这些有限 intent 上。
@@ -264,9 +363,31 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
         parsedAction.suggestedFallback ??
         "副手已接入。可以把你的问题当成待核验线索，沿时间戳、现场物件、出入记录和口供矛盾继续推进。";
       break;
-    case "SUBMIT_DEDUCTION":
-      resultText = "最终推理流程已经预留，本阶段暂未提交结算。";
+    case "SUBMIT_DEDUCTION": {
+      finalSubmission = evaluateFinalSubmission(input, caseData, state);
+      state.finalDeduction = buildFinalDeduction(input, caseData, state, finalSubmission.solved);
+      if (finalSubmission.solved) {
+        const killerName =
+          caseData.suspects.find((suspect) => suspect.id === caseData.truth.killer)?.name ?? finalSubmission.submittedName ?? "最终责任人";
+        resultText = [
+          `最终推理已采纳，结论指向「${killerName}」。`,
+          `动机：${caseData.truth.motive}`,
+          `手法：${caseData.truth.method}`,
+          `关键时间：${caseData.truth.deathTime}`,
+          "案件进入结案。",
+        ].join("\n");
+      } else if (!finalSubmission.killerCorrect) {
+        resultText = finalSubmission.submittedName
+          ? `最终推理已提交，但「${finalSubmission.submittedName}」和当前证据链不吻合。先回到动机、机会和时间线重新核对。`
+          : "最终推理已提交，但还没有明确指认责任人。请写出责任人、动机、手法和关键时间线。";
+      } else {
+        resultText = [
+          "最终推理已提交，责任人方向基本对上，但结算还差一点证据链支撑。",
+          "请再补一条能说明动机、手法或关键时间窗口的原始记录，再提交即可。",
+        ].join("\n");
+      }
       break;
+    }
     default:
       resultText = "行动已接收，但该系统模块尚未实现。";
   }
@@ -276,7 +397,25 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
     (evidence) => state.discoveredEvidence.includes(evidence.id) && !beforeEvidence.has(evidence.id),
   );
 
-  const agentEvaluation = evaluateAgentLoop(caseData, state);
+  let agentEvaluation = evaluateAgentLoop(caseData, state);
+  if (finalSubmission?.solved) {
+    agentEvaluation = {
+      ...agentEvaluation,
+      phase: "solved",
+      truthScore: 100,
+      isSolved: true,
+      agentLogEntry: "玩家最终推理已命中责任人和证据链，案件进入结案。",
+    };
+  } else if (finalSubmission) {
+    agentEvaluation = {
+      ...agentEvaluation,
+      phase: finalSubmission.score >= 70 ? "closing" : agentEvaluation.phase,
+      truthScore: Math.max(agentEvaluation.truthScore, finalSubmission.score),
+      agentLogEntry: finalSubmission.killerCorrect
+        ? "最终推理方向正确，但仍需要补足动机、手法或关键时间线证据。"
+        : "最终推理已记录，但责任人指认与当前证据链不吻合。",
+    };
+  }
   state.phase = agentEvaluation.phase;
   state.truthScore = agentEvaluation.truthScore;
   state.agentLog = [...state.agentLog.slice(-5), agentEvaluation.agentLogEntry];

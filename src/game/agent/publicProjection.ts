@@ -1,5 +1,6 @@
 import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
 import { sortTimelineEvents } from "@/game/engine/timelineSort";
+export { buildRecommendedCommands } from "@/game/agent/recommendations";
 
 function redactEvidence(evidence: CaseData["evidence"][number]): CaseData["evidence"][number] {
   return {
@@ -151,20 +152,4 @@ export function buildVisibleRelationships(caseData: CaseData, state: PlayerCaseS
   state.playerRelationships.forEach(addRelationship);
 
   return Array.from(visibleById.values());
-}
-
-export function buildRecommendedCommands(caseData: CaseData, state: PlayerCaseState) {
-  const clues = buildVisibleClues(caseData, state);
-  const locations = buildVisibleLocations(caseData, state);
-  const suspects = buildVisibleSuspects(caseData, state);
-
-  return [
-    ...clues.slice(0, 2).map((clue) => `调查${clue.name}`),
-    ...locations
-      .filter((location) => location.id !== state.currentLocation)
-      .slice(0, 2)
-      .map((location) => `前往${location.name}`),
-    ...suspects.slice(0, 1).map((suspect) => `审问${suspect.name}，逻辑一点`),
-    "整理时间线",
-  ];
 }

@@ -577,14 +577,17 @@ export class RoomAgentRuntime {
       this.enqueueStatus("正在理解你的问题...", "critical", sessionId);
       const result = applyAction(trimmed, session.caseData, session.state);
       const localRoute = routeChatCommand(trimmed, session.caseData, result.state, this.chatMode, result.parsedAction);
-      const route = await routeChatCommandWithAi({
-        input: trimmed,
-        session,
-        nextState: result.state,
-        result,
-        currentMode: this.chatMode,
-        fallbackRoute: localRoute,
-      });
+      const route =
+        result.parsedAction.intent === "SUBMIT_DEDUCTION"
+          ? localRoute
+          : await routeChatCommandWithAi({
+              input: trimmed,
+              session,
+              nextState: result.state,
+              result,
+              currentMode: this.chatMode,
+              fallbackRoute: localRoute,
+            });
       appendSessionChatMessage(sessionId, {
         role: "user",
         speaker: "user",
@@ -598,6 +601,50 @@ export class RoomAgentRuntime {
         route,
         chatMode: this.chatMode,
       });
+
+      if (result.parsedAction.intent === "SUBMIT_DEDUCTION") {
+        this.enqueueStatus(result.isSolved ? "最终推理已结案。" : "最终推理已记录。", "critical", sessionId);
+        await this.streamFixedChatMessage({
+          sessionId,
+          turnId,
+          speaker: "assistant",
+          label: "真相中枢",
+          text: result.resultText,
+        });
+        const finalSession = this.finalizeAction({
+          baseSession: session,
+          caseData: session.caseData,
+          finalState: result.state,
+          input: trimmed,
+          result,
+          resultText: result.resultText,
+          sessionId,
+        });
+        this.enqueueVisualFocus(finalSession, {
+          ...visualFocusDecision,
+          asset: this.assetForVisualDecision(finalSession, visualFocusDecision),
+        });
+        const visualSession = this.revealTriggeredVisualAssets({
+          input: trimmed,
+          reply: result.resultText,
+          session: finalSession,
+          turnId,
+        });
+        this.enqueue(
+          {
+            event: "game.command.finished",
+            channel: "game",
+            payload: {
+              sessionId,
+              resultText: result.resultText,
+            },
+          },
+          { priority: "critical", sessionId, scope: "action.finished" },
+        );
+        this.finishTurn(sessionId, turnId);
+        this.scheduleIdleHint(visualSession);
+        return;
+      }
 
       if (route.kind === "off_topic" || route.kind === "spoiler_request") {
         this.enqueue(

@@ -1,6 +1,7 @@
 import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
 import type { CaseVisualManifest } from "@/game/schemas/visuals";
 import type { InvestigationData } from "@/components/investigation/types";
+import { buildRecommendedCommands } from "@/game/agent/recommendations";
 
 export function deriveInvestigationData(
   caseData: CaseData,
@@ -45,15 +46,7 @@ export function deriveInvestigationData(
     .filter(relationshipIsRevealed)
     .forEach(addRelationship);
   const visibleRelationships = Array.from(visibleRelationshipsById.values());
-  const recommendedCommands = [
-    ...availableClues.slice(0, 2).map((clue) => `调查${clue.name}`),
-    ...unlockedLocations
-      .filter((location) => location.id !== state.currentLocation)
-      .slice(0, 2)
-      .map((location) => `前往${location.name}`),
-    ...visibleSuspects.slice(0, 1).map((suspect) => `审问${suspect.name}，逻辑一点`),
-    "整理时间线",
-  ];
+  const recommendedCommands = buildRecommendedCommands(caseData, state);
 
   return {
     availableClues,

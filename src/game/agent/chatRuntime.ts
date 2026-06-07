@@ -96,6 +96,10 @@ export function routeChatCommand(
     return { kind: "off_topic", reason: offTopicReply };
   }
 
+  if (parsedAction.intent === "SUBMIT_DEDUCTION") {
+    return { kind: "case_assistant" };
+  }
+
   if (spoilerPatterns.some((keyword) => text.includes(normalize(keyword)))) {
     return { kind: "spoiler_request", reason: spoilerRequestReply };
   }

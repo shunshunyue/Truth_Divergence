@@ -36,6 +36,17 @@ function looksLikeFactFindingQuestion(input: string) {
   );
 }
 
+function looksLikeFinalSubmission(input: string) {
+  const lowered = normalize(input);
+  const hasSubmissionVerb = ["提交", "结案", "定案", "答案是", "我认为", "我推理", "最终推理"].some((keyword) =>
+    lowered.includes(normalize(keyword)),
+  );
+  const hasConclusionTarget = ["责任人", "凶手", "真凶", "最终答案", "最终责任人", "真相"].some((keyword) =>
+    lowered.includes(normalize(keyword)),
+  );
+  return hasSubmissionVerb && hasConclusionTarget;
+}
+
 export function parseAction(input: string, caseData: CaseData): ParsedAction {
   const lowered = normalize(input);
   // 先判断玩家想做什么，再从案件数据里抽取目标地点、嫌疑人、证据或物件。
@@ -51,6 +62,10 @@ export function parseAction(input: string, caseData: CaseData): ParsedAction {
     .find((object) => lowered.includes(normalize(object.name)) || lowered.includes(normalize(object.id)))?.id;
 
   let intent: ParsedAction["intent"] = matchedIntent ?? "ASK_ASSISTANT";
+
+  if (looksLikeFinalSubmission(input)) {
+    intent = "SUBMIT_DEDUCTION";
+  }
 
   if (!matchedIntent) {
     // 如果没有命中动作关键词，就根据目标类型做保守推断：
