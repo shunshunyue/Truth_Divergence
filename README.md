@@ -133,6 +133,25 @@ CASE_CACHE_INTERVAL_MS=          # 缓存 worker 检查间隔
 
 注意：不要把 API Key 写进 `NEXT_PUBLIC_*` 变量，项目中的 AI Key 只应该在服务端读取。
 
+### MinIO 图片存储
+
+默认情况下，案件生成图会写入本地 `public/generated/cases`。如果不想让生成图进入项目目录和部署包，可以把视觉资源切到 MinIO：
+
+```env
+VISUAL_STORAGE_DRIVER=minio              # 使用 MinIO 保存生成图片；local 表示继续写本地 public 目录
+MINIO_ENDPOINT=localhost                 # MinIO 服务地址，只写主机名或 IP，不要带 http://
+MINIO_PORT=9000                          # MinIO API 端口
+MINIO_USE_SSL=false                      # 本地开发通常为 false；HTTPS 部署时改为 true
+MINIO_ACCESS_KEY=你的账号                 # MinIO access key
+MINIO_SECRET_KEY=你的密码                 # MinIO secret key
+MINIO_BUCKET=truth-divergence            # 存放生成图片的 bucket
+MINIO_PUBLIC_URL=http://localhost:9000/truth-divergence  # 浏览器访问图片的公开基础地址
+MINIO_PREFIX=generated/cases             # 对象名前缀
+MINIO_CREATE_BUCKET=true                 # bucket 不存在时自动创建，开发环境推荐开启
+```
+
+`MINIO_PUBLIC_URL` 必须是浏览器可以直接访问图片的地址。也就是说，bucket 需要配置公开读取，或者这个地址要指向你自己的公开代理/CDN。切换到 MinIO 后，只影响新生成的图片；数据库里已有的旧图片 URL 不会自动迁移。
+
 ## 玩法示例
 
 进入调查页后，可以尝试输入：

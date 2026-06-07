@@ -1,7 +1,6 @@
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
 import { createHash } from "crypto";
 import OpenAI from "openai";
+import { saveVisualObject } from "@/ai/visualStorage";
 import type { CaseData, Evidence, SuspectProfile } from "@/game/schemas/game";
 import {
   caseVisualManifestSchema,
@@ -69,15 +68,6 @@ function envFlag(name: string, fallback = true) {
   const value = process.env[name];
   if (value == null) return fallback;
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
-}
-
-function getVisualsDir() {
-  return process.env.CASE_VISUALS_DIR ?? "public/generated/cases";
-}
-
-function getPublicBasePath() {
-  const dir = getVisualsDir().replace(/\\/g, "/").replace(/^public\/?/, "");
-  return `/${dir.replace(/^\/+|\/+$/g, "")}`;
 }
 
 function safeSlug(value: string) {
@@ -739,13 +729,6 @@ function fallbackSvg(title: string, kind: VisualAssetKind) {
 </svg>`;
 }
 
-async function writeFallbackAsset(assetDir: string, filename: string, title: string, kind: VisualAssetKind) {
-  await mkdir(assetDir, { recursive: true });
-  const filePath = path.join(assetDir, filename);
-  await writeFile(filePath, fallbackSvg(title, kind), "utf8");
-  return filePath;
-}
-
 export async function requestOpenAiImage({
   prompt,
   width,
@@ -792,19 +775,23 @@ export async function requestOpenAiImage({
 }
 
 async function generateAssetImage({
-  assetDir,
-  filename,
+  relativePath,
   planned,
 }: {
-  assetDir: string;
-  filename: string;
+  relativePath: string;
   planned: PlannedAsset;
 }): Promise<ImageGenerationResult> {
   const visualsEnabled = envFlag("CASE_VISUALS_ENABLED", true);
+  const fallbackRelativePath = relativePath.replace(/\.png$/, ".svg");
+
   if (!visualsEnabled || !hasOpenAiImageCredentials()) {
-    await writeFallbackAsset(assetDir, filename.replace(/\.png$/, ".svg"), planned.title, planned.kind);
+    const fallback = await saveVisualObject({
+      relativePath: fallbackRelativePath,
+      body: fallbackSvg(planned.title, planned.kind),
+      contentType: "image/svg+xml",
+    });
     return {
-      fileUrl: undefined,
+      fileUrl: fallback.url,
       source: "fallback",
       status: "ready",
       width: FALLBACK_IMAGE_WIDTH,
@@ -813,27 +800,32 @@ async function generateAssetImage({
     };
   }
 
-  await mkdir(assetDir, { recursive: true });
-  const filePath = path.join(assetDir, filename);
   try {
     const image = await requestOpenAiImage({
       prompt: planned.prompt,
       width: planned.width,
       height: planned.height,
     });
-    await writeFile(filePath, image.buffer);
+    const saved = await saveVisualObject({
+      relativePath,
+      body: image.buffer,
+      contentType: "image/png",
+    });
     return {
-      fileUrl: undefined,
+      fileUrl: saved.url,
       source: "openai",
       status: "ready",
       width: image.width,
       height: image.height,
     };
   } catch (error) {
-    const fallbackName = filename.replace(/\.png$/, ".svg");
-    await writeFallbackAsset(assetDir, fallbackName, planned.title, planned.kind);
+    const fallback = await saveVisualObject({
+      relativePath: fallbackRelativePath,
+      body: fallbackSvg(planned.title, planned.kind),
+      contentType: "image/svg+xml",
+    });
     return {
-      fileUrl: undefined,
+      fileUrl: fallback.url,
       source: "fallback",
       status: "failed",
       width: FALLBACK_IMAGE_WIDTH,
@@ -851,8 +843,6 @@ export async function generateCaseVisualManifest(
   const style = buildVisualStyle(caseData);
   const plannedAssets = planCaseAssets(caseData, style);
   const now = new Date().toISOString();
-  const rootDir = path.join(process.cwd(), getVisualsDir(), cacheId);
-  const publicBase = `${getPublicBasePath()}/${cacheId}`;
   const concurrency = Math.max(1, Number(process.env.CASE_VISUALS_CONCURRENCY ?? 2));
   const assets: VisualAsset[] = [];
 
@@ -862,10 +852,8 @@ export async function generateCaseVisualManifest(
       const currentIndex = index;
       index += 1;
       const planned = plannedAssets[currentIndex];
-      const kindDir = path.join(rootDir, planned.kind);
       const slug = safeSlug(planned.entityId ?? planned.title);
       const filename = `${slug}.png`;
-      const fallbackFilename = `${slug}.svg`;
       options.logger?.("正在生成视觉资产。", {
         kind: planned.kind,
         title: planned.title,
@@ -873,9 +861,10 @@ export async function generateCaseVisualManifest(
         total: plannedAssets.length,
       });
 
-      const result = await generateAssetImage({ assetDir: kindDir, filename, planned });
-      const isOpenAi = result.source === "openai" && result.status === "ready";
-      const fileNameForUrl = isOpenAi ? filename : fallbackFilename;
+      const result = await generateAssetImage({
+        relativePath: `${cacheId}/${planned.kind}/${filename}`,
+        planned,
+      });
       const assetNow = new Date().toISOString();
       assets[currentIndex] = {
         id: `visual-${planned.kind}-${slug}`,
@@ -885,8 +874,8 @@ export async function generateCaseVisualManifest(
         ...(planned.description ? { description: planned.description } : {}),
         ...(planned.caption ? { caption: planned.caption } : {}),
         prompt: planned.prompt,
-        fileUrl: `${publicBase}/${planned.kind}/${fileNameForUrl}`,
-        thumbUrl: `${publicBase}/${planned.kind}/${fileNameForUrl}`,
+        fileUrl: result.fileUrl,
+        thumbUrl: result.fileUrl,
         status: result.status,
         source: result.source,
         visibility: planned.visibility,
@@ -930,14 +919,12 @@ export async function generateEvidenceVisualAsset({
   manifest: CaseVisualManifest;
 }) {
   const planned = planEvidenceAsset(evidence, manifest.style);
-  const rootDir = path.join(process.cwd(), getVisualsDir(), cacheId);
-  const publicBase = `${getPublicBasePath()}/${cacheId}`;
-  const kindDir = path.join(rootDir, planned.kind);
   const slug = safeSlug(planned.entityId ?? planned.title);
   const filename = `${slug}.png`;
-  const fallbackFilename = `${slug}.svg`;
-  const result = await generateAssetImage({ assetDir: kindDir, filename, planned });
-  const isOpenAi = result.source === "openai" && result.status === "ready";
+  const result = await generateAssetImage({
+    relativePath: `${cacheId}/${planned.kind}/${filename}`,
+    planned,
+  });
   const now = new Date().toISOString();
 
   return {
@@ -948,8 +935,8 @@ export async function generateEvidenceVisualAsset({
     ...(planned.description ? { description: planned.description } : {}),
     ...(planned.caption ? { caption: planned.caption } : {}),
     prompt: planned.prompt,
-    fileUrl: `${publicBase}/${planned.kind}/${isOpenAi ? filename : fallbackFilename}`,
-    thumbUrl: `${publicBase}/${planned.kind}/${isOpenAi ? filename : fallbackFilename}`,
+    fileUrl: result.fileUrl,
+    thumbUrl: result.fileUrl,
     status: result.status,
     source: result.source,
     visibility: planned.visibility,

@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { generateInitialSession } from "@/ai/caseGenerator";
 import { generateCaseVisualManifest } from "@/ai/imageGenerator";
+import { getVisualStorageDriver, getVisualsDir } from "@/ai/visualStorage";
 import { countReadyCases, insertFailedCase, insertReadyCase } from "@/game/cache/caseCache";
 
 export type CaseCacheWorkerEvent = {
@@ -67,8 +68,10 @@ function errorMessage(error: unknown) {
 }
 
 async function writeHomeHeroSidecar(cacheId: string, session: Awaited<ReturnType<typeof generateInitialSession>>) {
+  if (getVisualStorageDriver() !== "local") return;
+
   const coverAsset = session.visualManifest?.assets.find((asset) => asset.kind === "case_cover" && asset.fileUrl);
-  const sidecarDir = path.join(process.cwd(), process.env.CASE_VISUALS_DIR ?? "public/generated/cases", cacheId);
+  const sidecarDir = path.join(process.cwd(), getVisualsDir(), cacheId);
   const sidecarPath = path.join(sidecarDir, "home-hero.json");
 
   await mkdir(sidecarDir, { recursive: true });

@@ -17,6 +17,7 @@
     "dotenv": "^17.4.2",
     "framer-motion": "^12.40.0",
     "lucide-react": "latest",
+    "minio": "^8.0.7",
     "mysql2": "^3.22.4",
     "next": "latest",
     "openai": "^6.42.0",

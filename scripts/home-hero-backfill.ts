@@ -2,6 +2,7 @@ import "tsconfig-paths/register";
 import { config } from "dotenv";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
+import { getVisualStorageDriver, getVisualsDir } from "@/ai/visualStorage";
 import {
   closeCaseCachePool,
   listCasesWithVisuals,
@@ -18,9 +19,11 @@ function log(message: string, data?: Record<string, unknown>) {
 }
 
 async function writeSidecar(record: CachedCaseRecord, homeHero: HomeHeroCopy) {
+  if (getVisualStorageDriver() !== "local") return;
+
   const cacheId = record.visualManifest?.cacheId ?? record.id;
   const coverAsset = record.visualManifest?.assets.find((asset) => asset.kind === "case_cover" && asset.fileUrl);
-  const sidecarDir = path.join(process.cwd(), process.env.CASE_VISUALS_DIR ?? "public/generated/cases", cacheId);
+  const sidecarDir = path.join(process.cwd(), getVisualsDir(), cacheId);
 
   await mkdir(sidecarDir, { recursive: true });
   await writeFile(

@@ -1,16 +1,11 @@
 import "tsconfig-paths/register";
 import { config } from "dotenv";
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
 import { requestOpenAiImage } from "@/ai/imageGenerator";
+import { saveVisualObject } from "@/ai/visualStorage";
 
 config({ path: ".env.local", quiet: true });
 
 async function main() {
-  const outDir = path.join(process.cwd(), "public/generated/smoke");
-  const outFile = path.join(outDir, `image-${Date.now()}.png`);
-  await mkdir(outDir, { recursive: true });
-
   const image = await requestOpenAiImage({
     width: 1024,
     height: 1024,
@@ -20,14 +15,17 @@ async function main() {
       "No readable text, no logo, no watermark, square crop.",
     ].join(" "),
   });
+  const saved = await saveVisualObject({
+    relativePath: `smoke/image-${Date.now()}.png`,
+    body: image.buffer,
+    contentType: "image/png",
+  });
 
-  await writeFile(outFile, image.buffer);
   console.log(
     JSON.stringify(
       {
         ok: true,
-        file: outFile,
-        publicUrl: `/generated/smoke/${path.basename(outFile)}`,
+        publicUrl: saved.url,
         model: image.model,
         baseURL: image.baseURL,
         width: image.width,
