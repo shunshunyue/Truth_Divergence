@@ -7,6 +7,7 @@ import {
   shouldGenerateRuntimeVisualAssets,
 } from "@/ai/imageGenerator";
 import { applyAction } from "@/game/engine/applyAction";
+import { parseAction } from "@/game/engine/parseAction";
 import {
   appendSessionChatMessage,
   createSession,
@@ -575,7 +576,7 @@ export class RoomAgentRuntime {
     this.scheduleIdleHint(session);
   }
 
-  async command(sessionId: string, input: string) {
+  async command(sessionId: string, input: string, options?: { finalSubmissionConfirmed?: boolean }) {
     if (this.running) {
       this.enqueueStatus("上一条调查指令仍在处理中。", "normal", sessionId);
       return;
@@ -595,6 +596,41 @@ export class RoomAgentRuntime {
 
       const turnId = randomUUID();
       this.enqueueStatus("正在理解你的问题...", "critical", sessionId);
+      const previewAction = parseAction(trimmed, session.caseData);
+      if (previewAction.intent === "SUBMIT_DEDUCTION" && !options?.finalSubmissionConfirmed) {
+        appendSessionChatMessage(sessionId, {
+          role: "user",
+          speaker: "user",
+          label: "你",
+          text: trimmed,
+        });
+        const promptText = "这会作为最终答案提交，提交后会立刻判定对错并结束本局。";
+        this.enqueue(
+          {
+            event: "game.final_submission.confirmation_required",
+            channel: "game",
+            payload: {
+              sessionId,
+              input: trimmed,
+              resultText: promptText,
+            },
+          },
+          { priority: "critical", sessionId, scope: "final.confirm" },
+        );
+        this.enqueue(
+          {
+            event: "game.command.finished",
+            channel: "game",
+            payload: {
+              sessionId,
+              resultText: promptText,
+            },
+          },
+          { priority: "critical", sessionId, scope: "action.finished" },
+        );
+        this.finishTurn(sessionId, turnId);
+        return;
+      }
       const result = applyAction(trimmed, session.caseData, session.state);
       const localRoute = routeChatCommand(trimmed, session.caseData, result.state, this.chatMode, result.parsedAction);
       const route =
@@ -623,7 +659,7 @@ export class RoomAgentRuntime {
       });
 
       if (result.parsedAction.intent === "SUBMIT_DEDUCTION") {
-        this.enqueueStatus(result.isSolved ? "最终推理已结案。" : "最终推理已记录。", "critical", sessionId);
+        this.enqueueStatus(result.isSolved ? "提交正确，案件已结案。" : "提交错误，案件已结束。", "critical", sessionId);
         await this.streamFixedChatMessage({
           sessionId,
           turnId,

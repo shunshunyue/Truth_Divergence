@@ -173,7 +173,16 @@ function applyUseEvidence(caseData: CaseData, state: PlayerCaseState, action: Pa
 function normalizeMatchText(value: string) {
   return value
     .toLowerCase()
-    .replace(/[\s"'“”‘’《》<>【】[\]（）()，,。.:：;；、_\-]/g, "");
+    .replace(/[\s"'“”‘’《》<>【】[\]（）()，,。.:：;；、_\-]/g, "")
+    .replace(/^提交/, "")
+    .replace(/^结案/, "")
+    .replace(/^定案/, "")
+    .replace(/^答案是/, "")
+    .replace(/^我的答案是?/, "")
+    .replace(/^我认为/, "")
+    .replace(/^我推理/, "")
+    .replace(/^最终推理/, "")
+    .replace(/^最终答案是?/, "");
 }
 
 function meaningfulTerms(text: string) {
@@ -199,8 +208,13 @@ function textMatchesTruth(input: string, truthText: string) {
   return hits >= Math.min(2, terms.length);
 }
 
+function textMatchesAny(input: string, terms: string[]) {
+  return terms.some((term) => textMatchesTruth(input, term));
+}
+
 function submittedSuspect(input: string, caseData: CaseData) {
   const normalizedInput = normalizeMatchText(input);
+  if (textMatchesAny(input, ["自杀", "自己杀自己", "自行了断", "不是他杀", "无人行凶"])) return undefined;
   return caseData.suspects.find((suspect) =>
     [suspect.id, suspect.name, suspect.identity].some((value) => normalizedInput.includes(normalizeMatchText(value))),
   );
@@ -228,17 +242,26 @@ function buildFinalDeduction(input: string, caseData: CaseData, state: PlayerCas
   };
 }
 
+function killerSubmissionCorrect(input: string, caseData: CaseData, suspect: SuspectProfile | undefined) {
+  if (suspect) return suspect.id === caseData.truth.killer;
+
+  const killer = caseData.suspects.find((item) => item.id === caseData.truth.killer);
+  const killerText = [killer?.name, killer?.identity, ...caseData.truth.hiddenRelationships].filter(Boolean).join(" ");
+  const selfHarmAnswer = textMatchesAny(input, ["自杀", "自己杀自己", "自行了断", "不是他杀", "无人行凶"]);
+  const truthIsSelfHarm = textMatchesAny(killerText, ["自杀", "自己杀自己", "自行了断", "不是他杀", "无人行凶"]);
+
+  return selfHarmAnswer && truthIsSelfHarm;
+}
+
 function evaluateFinalSubmission(input: string, caseData: CaseData, state: PlayerCaseState) {
   const suspect = submittedSuspect(input, caseData);
-  const killerCorrect = Boolean(suspect && suspect.id === caseData.truth.killer);
+  const killerCorrect = killerSubmissionCorrect(input, caseData, suspect);
   const motiveMatched = textMatchesTruth(input, caseData.truth.motive);
   const methodMatched = textMatchesTruth(input, caseData.truth.method);
   const timeMatched = textMatchesTruth(input, caseData.truth.deathTime);
   const preSubmitEvaluation = evaluateAgentLoop(caseData, state);
   const evidenceCount = knownEvidenceCount(caseData, state);
-  const hasEnoughProgress = preSubmitEvaluation.truthScore >= 70 || evidenceCount >= 5 || state.playerTimeline.length >= 4;
-  const hasDetailedAnswer = motiveMatched || methodMatched || timeMatched;
-  const solved = killerCorrect && (hasEnoughProgress || hasDetailedAnswer);
+  const solved = killerCorrect;
   const score = solved
     ? 100
     : Math.min(
@@ -255,8 +278,6 @@ function evaluateFinalSubmission(input: string, caseData: CaseData, state: Playe
 
   return {
     evidenceCount,
-    hasDetailedAnswer,
-    hasEnoughProgress,
     killerCorrect,
     methodMatched,
     motiveMatched,
@@ -370,20 +391,25 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
         const killerName =
           caseData.suspects.find((suspect) => suspect.id === caseData.truth.killer)?.name ?? finalSubmission.submittedName ?? "最终责任人";
         resultText = [
-          `最终推理已采纳，结论指向「${killerName}」。`,
+          "提交判定：正确。",
+          `结论指向「${killerName}」。`,
           `动机：${caseData.truth.motive}`,
           `手法：${caseData.truth.method}`,
           `关键时间：${caseData.truth.deathTime}`,
-          "案件进入结案。",
+          "案件已结束。",
         ].join("\n");
-      } else if (!finalSubmission.killerCorrect) {
-        resultText = finalSubmission.submittedName
-          ? `最终推理已提交，但「${finalSubmission.submittedName}」和当前证据链不吻合。先回到动机、机会和时间线重新核对。`
-          : "最终推理已提交，但还没有明确指认责任人。请写出责任人、动机、手法和关键时间线。";
       } else {
+        const killerName = caseData.suspects.find((suspect) => suspect.id === caseData.truth.killer)?.name ?? "最终责任人";
         resultText = [
-          "最终推理已提交，责任人方向基本对上，但结算还差一点证据链支撑。",
-          "请再补一条能说明动机、手法或关键时间窗口的原始记录，再提交即可。",
+          "提交判定：错误。",
+          finalSubmission.submittedName
+            ? `你提交的「${finalSubmission.submittedName}」不是本案真相指向。`
+            : "这份答案没有命中本案真相指向。",
+          `正确结论：${killerName}。`,
+          `动机：${caseData.truth.motive}`,
+          `手法：${caseData.truth.method}`,
+          `关键时间：${caseData.truth.deathTime}`,
+          "案件已结束。",
         ].join("\n");
       }
       break;
@@ -409,11 +435,11 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
   } else if (finalSubmission) {
     agentEvaluation = {
       ...agentEvaluation,
-      phase: finalSubmission.score >= 70 ? "closing" : agentEvaluation.phase,
+      phase: "failed",
       truthScore: Math.max(agentEvaluation.truthScore, finalSubmission.score),
       agentLogEntry: finalSubmission.killerCorrect
-        ? "最终推理方向正确，但仍需要补足动机、手法或关键时间线证据。"
-        : "最终推理已记录，但责任人指认与当前证据链不吻合。",
+        ? "最终推理方向正确，但提交判定未通过。"
+        : "最终推理提交错误，本局调查结束。",
     };
   }
   state.phase = agentEvaluation.phase;

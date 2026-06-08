@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
+  ArrowLeft,
   ChevronDown,
   ChevronRight,
   Clock3,
@@ -14,6 +16,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Stamp,
   UserRound,
   X,
 } from "lucide-react";
@@ -297,6 +300,201 @@ function VisualInlineStatus({ asset }: { asset?: VisualAsset }) {
   return null;
 }
 
+export function FinalSubmissionConfirmModal({
+  caseTitle,
+  command,
+  message,
+  onCancel,
+  onConfirm,
+}: {
+  caseTitle: string;
+  command: string;
+  message?: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <motion.div
+      className="fixed inset-0 z-[72] grid place-items-center bg-[#27241f]/46 p-4 backdrop-blur"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onCancel}
+    >
+      <motion.div
+        className="w-full max-w-lg overflow-hidden rounded-lg border border-[#c5533d] bg-[#fffdf7] shadow-[0_30px_110px_rgba(31,25,17,0.36)]"
+        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.985 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      >
+        <div className="border-b border-[#d8cfba] bg-[#fff0ea] px-5 py-4">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-[#d0a092] bg-[#fff7f3] text-[#a64e3b]">
+              <AlertTriangle size={18} />
+            </span>
+            <div className="min-w-0">
+              <p className="font-mono text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[#a64e3b]">
+                final submission
+              </p>
+              <h3 className="mt-1 text-lg font-black leading-tight text-[#27241f]">确定提交最终答案？</h3>
+            </div>
+          </div>
+        </div>
+        <div className="px-5 py-4">
+          <p className="text-sm font-semibold leading-6 text-[#4f483d]">{caseTitle}</p>
+          <div className="mt-3 rounded-md border border-[#d8cfba] bg-[#f8f3e8] p-3">
+            <p className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-[#8a5d19]">提交内容</p>
+            <p className="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-[#27241f]">{command}</p>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-[#6a6256]">
+            {message || "提交后会立刻判定对错，并结束本局。取消后可以继续调查。"}
+          </p>
+        </div>
+        <div className="flex flex-col-reverse gap-2 border-t border-[#d8cfba] bg-[#fbf8f0] px-5 py-4 sm:flex-row sm:justify-end">
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-md border border-[#cfc4ad] bg-[#fffdf7] px-4 font-mono text-xs font-bold text-[#675d4f] transition hover:border-[#24615b] hover:text-[#24615b]"
+            onClick={onCancel}
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#6d2d25] bg-[#8b3528] px-4 font-mono text-xs font-bold text-[#fff7f3] transition hover:bg-[#a64e3b]"
+            onClick={onConfirm}
+            type="button"
+          >
+            <Stamp size={14} />
+            确定提交
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+export function CaseEndScreen({
+  caseTitle,
+  resultText,
+  state,
+  onExit,
+  onReview,
+}: {
+  caseTitle: string;
+  resultText?: string;
+  state: PlayerCaseState;
+  onExit: () => void;
+  onReview: () => void;
+}) {
+  const isCorrect = state.phase === "solved";
+  const lines = (resultText || state.actionHistory[state.actionHistory.length - 1]?.result || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const submitted = state.finalDeduction?.report || state.actionHistory[state.actionHistory.length - 1]?.input || "最终答案";
+  const verdict = isCorrect ? "回答正确" : "回答错误";
+
+  return (
+    <motion.section
+      className={[
+        "relative flex h-full min-h-0 overflow-hidden bg-[#f4f0e7] text-[#27241f]",
+        isCorrect ? "shadow-[inset_0_0_120px_rgba(36,97,91,0.16)]" : "shadow-[inset_0_0_120px_rgba(166,78,59,0.16)]",
+      ].join(" ")}
+      initial={{ opacity: 0, scale: 0.992 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.36, ease: "easeOut" }}
+    >
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(39,36,31,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(39,36,31,0.06)_1px,transparent_1px)] bg-[size:34px_34px]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_16%_20%,rgba(111,213,199,0.18),transparent_25rem),radial-gradient(circle_at_84%_30%,rgba(197,83,61,0.14),transparent_28rem),radial-gradient(circle_at_50%_100%,rgba(207,166,91,0.16),transparent_32rem)]" />
+      <div className="td-scrollbar relative z-10 flex min-h-0 w-full overflow-y-auto px-4 py-6 sm:px-8">
+        <div className="mx-auto grid w-full max-w-5xl content-center gap-5 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start">
+          <motion.div
+            className="overflow-hidden rounded-lg border border-[#c8bda7] bg-[#fffdf7]/92 shadow-[0_28px_90px_rgba(31,25,17,0.2)] backdrop-blur"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05, duration: 0.28 }}
+          >
+            <div className={["border-b px-5 py-5 sm:px-6", isCorrect ? "border-[#b8d8d2] bg-[#e8f6f2]" : "border-[#d0a092] bg-[#fff0ea]"].join(" ")}>
+              <div className="flex items-start gap-4">
+                <span
+                  className={[
+                    "grid h-12 w-12 shrink-0 place-items-center rounded-md border",
+                    isCorrect ? "border-[#24615b] bg-[#163c3a] text-[#eafffb]" : "border-[#a64e3b] bg-[#8b3528] text-[#fff7f3]",
+                  ].join(" ")}
+                >
+                  {isCorrect ? <ShieldCheck size={22} /> : <AlertTriangle size={22} />}
+                </span>
+                <div className="min-w-0">
+                  <p className={["font-mono text-[0.64rem] font-bold uppercase tracking-[0.18em]", isCorrect ? "text-[#24615b]" : "text-[#a64e3b]"].join(" ")}>
+                    final verdict
+                  </p>
+                  <h1 className="mt-2 text-3xl font-black leading-none text-[#27241f] sm:text-5xl">{verdict}</h1>
+                  <p className="mt-3 text-sm font-semibold leading-6 text-[#4f483d]">{caseTitle}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 px-5 py-5 sm:px-6">
+              <div className="rounded-md border border-[#d8cfba] bg-[#f8f3e8] p-4">
+                <p className="font-mono text-[0.6rem] font-bold uppercase tracking-[0.16em] text-[#8a5d19]">submitted answer</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-[#27241f]">{submitted}</p>
+              </div>
+              {lines.length > 0 && (
+                <div className="grid gap-2">
+                  {lines.map((line, index) => (
+                    <motion.p
+                      key={`${line}-${index}`}
+                      className="rounded-md border border-[#d8cfba] bg-[#fffaf0] px-3 py-2 text-sm leading-6 text-[#4f483d]"
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.1 + index * 0.04, duration: 0.2 }}
+                    >
+                      {line}
+                    </motion.p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+
+          <motion.aside
+            className="rounded-lg border border-[#c8bda7] bg-[#fffdf7]/86 p-4 shadow-[0_18px_54px_rgba(31,25,17,0.14)] backdrop-blur"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.12, duration: 0.28 }}
+          >
+            <p className="font-mono text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[#24615b]">case archive</p>
+            <div className="mt-4 grid grid-cols-3 gap-2 lg:grid-cols-1">
+              <MiniStat label="真相度" value={String(state.truthScore)} />
+              <MiniStat label="证据" value={String(state.discoveredEvidence.length)} />
+              <MiniStat label="行动" value={String(state.actionHistory.length)} />
+            </div>
+            <div className="mt-5 grid gap-2">
+              <button
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-[#143b37] bg-[#163c3a] px-4 font-mono text-xs font-bold text-[#eafffb] transition hover:bg-[#24615b]"
+                onClick={onExit}
+                type="button"
+              >
+                <ArrowLeft size={14} />
+                返回首页
+              </button>
+              <button
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-[#cfc4ad] bg-[#fffdf7] px-4 font-mono text-xs font-bold text-[#675d4f] transition hover:border-[#24615b] hover:text-[#24615b]"
+                onClick={onReview}
+                type="button"
+              >
+                <FileText size={14} />
+                复盘案卷
+              </button>
+            </div>
+          </motion.aside>
+        </div>
+      </div>
+    </motion.section>
+  );
+}
+
 function ChatVisualAttachmentGrid({
   assets,
   onOpen,
@@ -553,11 +751,12 @@ export function ExitCaseConfirmModal({
   onConfirm,
 }: {
   caseTitle: string;
-  reason: "manual" | "solved";
+  reason: "manual" | "solved" | "failed";
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const isSolved = reason === "solved";
+  const isFailed = reason === "failed";
 
   return (
     <motion.div
@@ -578,14 +777,14 @@ export function ExitCaseConfirmModal({
         <div className="border-b border-[#d8cfba] bg-[#fbf8f0] px-5 py-4">
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-[#b8d8d2] bg-[#e8f6f2] text-[#24615b]">
-              {isSolved ? <ShieldCheck size={18} /> : <LogOut size={18} />}
+              {isSolved ? <ShieldCheck size={18} /> : isFailed ? <AlertTriangle size={18} /> : <LogOut size={18} />}
             </span>
             <div className="min-w-0">
               <p className="font-mono text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[#24615b]">
-                {isSolved ? "case closed" : "leave case"}
+                {isSolved ? "case closed" : isFailed ? "case ended" : "leave case"}
               </p>
               <h3 className="mt-1 text-lg font-black leading-tight text-[#27241f]">
-                {isSolved ? "确认退出已完成案件？" : "确认退出当前案件？"}
+                {isSolved || isFailed ? "确认退出已结束案件？" : "确认退出当前案件？"}
               </h3>
             </div>
           </div>
@@ -595,6 +794,8 @@ export function ExitCaseConfirmModal({
           <p className="mt-2 text-sm leading-6 text-[#6a6256]">
             {isSolved
               ? "确认后会清除这局案件的本地进度，并返回首页。"
+              : isFailed
+                ? "确认后会清除这局案件的本地进度，并返回首页。"
               : "未结案进度会被清除；取消后可以继续调查，刷新浏览器也会回到这局。"}
           </p>
         </div>
@@ -1174,7 +1375,8 @@ export function CenterStage({
   const [cmdExpanded, setCmdExpanded] = useState(false);
   const [selectedAttachment, setSelectedAttachment] = useState<VisualAsset | null>(null);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const solvedPulse = usePulseFlag(phase === "solved", 1700);
+  const isEnded = phase === "solved" || phase === "failed";
+  const endPulse = usePulseFlag(isEnded, 1700);
 
   useEffect(() => {
     const element = chatScrollRef.current;
@@ -1182,7 +1384,15 @@ export function CenterStage({
     element.scrollTop = element.scrollHeight;
   }, [chatMessages]);
 
-  const statusText = isActing ? "正在生成回答" : chatMode.mode === "interrogation" ? "问询接入" : "中枢在线";
+  const statusText = isEnded
+    ? phase === "solved"
+      ? "案件已结案"
+      : "提交错误，案件已结束"
+    : isActing
+      ? "正在生成回答"
+      : chatMode.mode === "interrogation"
+        ? "问询接入"
+        : "中枢在线";
   const isInterrogation = chatMode.mode === "interrogation";
 
   return (
@@ -1266,21 +1476,21 @@ export function CenterStage({
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <motion.div
-                className="flex items-center gap-2 rounded-full border bg-white/70 px-3 py-1.5 font-mono text-[0.62rem]"
+                className="flex min-w-0 max-w-[15rem] items-center gap-2 rounded-full border bg-white/70 px-3 py-1.5 font-mono text-[0.62rem]"
                 animate={{
-                  borderColor: isInterrogation ? "#d0a092" : "#d8cfba",
-                  color: isInterrogation ? "#a64e3b" : "#24615b",
+                  borderColor: phase === "failed" ? "#d0a092" : isInterrogation ? "#d0a092" : "#d8cfba",
+                  color: phase === "failed" ? "#a64e3b" : isInterrogation ? "#a64e3b" : "#24615b",
                 }}
               >
                 <motion.span
                   className="h-1.5 w-1.5 rounded-full"
                   animate={{
                     scale: isActing ? [1, 1.55, 1] : [1, 1.25, 1],
-                    backgroundColor: isInterrogation ? "#c5533d" : "#2a8c80",
+                    backgroundColor: phase === "failed" ? "#c5533d" : isInterrogation ? "#c5533d" : "#2a8c80",
                   }}
                   transition={{ duration: isInterrogation ? 1.25 : 1, repeat: Infinity }}
                 />
-                {statusText}
+                <span className="truncate">{statusText}</span>
               </motion.div>
               <button
                 aria-label="退出案件"
@@ -1401,18 +1611,8 @@ export function CenterStage({
         </div>
       )}
 
-      {phase === "solved" && (
-        <motion.div
-          className="absolute right-3 top-3 z-10 border border-signal/60 bg-[#e7f05f]/15 px-3 py-1.5 font-mono text-xs text-[#6f6f18]"
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          案件已结案
-        </motion.div>
-      )}
-
       <AnimatePresence>
-        {solvedPulse && phase === "solved" && (
+        {endPulse && isEnded && (
           <motion.div
             className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-[#27241f]/12 backdrop-blur-[1px]"
             initial={{ opacity: 0 }}
@@ -1420,13 +1620,16 @@ export function CenterStage({
             exit={{ opacity: 0 }}
           >
             <motion.div
-              className="td-stamp border-[#9d6d21] bg-[#fffdf7]/90 px-6 py-4 text-2xl text-[#9d6d21] shadow-[0_20px_80px_rgba(49,40,28,0.18)]"
+              className={[
+                "td-stamp bg-[#fffdf7]/90 px-6 py-4 text-2xl shadow-[0_20px_80px_rgba(49,40,28,0.18)]",
+                phase === "solved" ? "border-[#9d6d21] text-[#9d6d21]" : "border-[#a64e3b] text-[#a64e3b]",
+              ].join(" ")}
               initial={{ opacity: 0, scale: 1.7, rotate: -9 }}
               animate={{ opacity: 1, scale: [1.7, 0.96, 1], rotate: -9 }}
               exit={{ opacity: 0, scale: 0.96 }}
               transition={{ duration: 0.48, ease: "easeOut" }}
             >
-              CASE CLOSED
+              {phase === "solved" ? "CASE CLOSED" : "ANSWER REJECTED"}
             </motion.div>
           </motion.div>
         )}
@@ -1486,8 +1689,8 @@ export function CenterStage({
                 className="min-h-11 min-w-0 flex-1 rounded-lg border border-[#d8cfba] bg-white px-3 text-sm text-[#27241f] outline-none transition placeholder:text-[#9b9180] focus:border-[#24615b] focus:shadow-[0_0_0_3px_rgba(36,97,91,0.12)]"
                 disabled={commandDisabled}
                 placeholder={
-                  phase === "solved"
-                      ? "案件已结案"
+                  isEnded
+                      ? "本局已结束"
                       : commandDisabled
                         ? "操作台准备中"
                         : chatMode.mode === "interrogation"

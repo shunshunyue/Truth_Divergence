@@ -1,6 +1,15 @@
 import type { CaseData, PlayerCaseState } from "@/game/schemas/game";
 
-export function evaluateAgentLoop(caseData: CaseData, state: PlayerCaseState) {
+export type AgentLoopEvaluation = {
+  agentLogEntry: string;
+  discoveredKeyEvidence: string[];
+  isSolved: boolean;
+  knownKeyTimeline: string[];
+  phase: PlayerCaseState["phase"];
+  truthScore: number;
+};
+
+export function evaluateAgentLoop(caseData: CaseData, state: PlayerCaseState): AgentLoopEvaluation {
   const discoveredKeyEvidence = caseData.truth.keyEvidence.filter((evidenceId) =>
     state.discoveredEvidence.includes(evidenceId),
   );

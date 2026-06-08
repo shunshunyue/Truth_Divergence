@@ -147,6 +147,15 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      event: "game.final_submission.confirmation_required";
+      channel: "game";
+      payload: {
+        sessionId: string;
+        input: string;
+        resultText: string;
+      };
+    }
+  | {
       event: "turn.finished";
       channel: "game";
       payload: {
@@ -217,6 +226,7 @@ export type AgentClientMessage =
       type: "player.command";
       sessionId: string;
       input: string;
+      finalSubmissionConfirmed?: boolean;
     }
   | {
       type: "client.ack";

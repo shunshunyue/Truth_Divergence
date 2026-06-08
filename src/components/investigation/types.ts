@@ -59,4 +59,5 @@ export const phaseLabels: Record<PlayerCaseState["phase"], string> = {
   investigating: "调查循环",
   closing: "接近真相",
   solved: "自动结案",
+  failed: "提交错误",
 };

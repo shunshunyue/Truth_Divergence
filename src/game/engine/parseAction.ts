@@ -12,7 +12,7 @@ const intentKeywords: Array<[ParsedAction["intent"], string[]]> = [
   ["BUILD_TIMELINE", ["timeline", "时间线", "轨迹"]],
   ["BUILD_RELATIONSHIP", ["relationship", "关系图", "关系线", "关系网", "人物关系", "整理关系", "梳理关系"]],
   ["ASK_ASSISTANT", ["assistant", "hint", "help", "助手", "提示", "帮我"]],
-  ["SUBMIT_DEDUCTION", ["submit", "deduction", "truth", "提交", "推理", "真相", "责任人", "真凶"]],
+  ["SUBMIT_DEDUCTION", ["submit", "submit answer", "final answer", "deduction", "提交", "交卷", "结案", "定案", "最终推理"]],
 ];
 
 function normalize(input: string) {
@@ -36,15 +36,23 @@ function looksLikeFactFindingQuestion(input: string) {
   );
 }
 
-function looksLikeFinalSubmission(input: string) {
+export function looksLikeFinalSubmission(input: string) {
   const lowered = normalize(input);
-  const hasSubmissionVerb = ["提交", "结案", "定案", "答案是", "我认为", "我推理", "最终推理"].some((keyword) =>
+  const asksQuestion = ["谁", "什么", "吗", "么", "？", "?"].some((keyword) => lowered.includes(normalize(keyword)));
+  const hasSubmissionVerb = ["提交", "交卷", "结案", "定案"].some((keyword) =>
     lowered.includes(normalize(keyword)),
   );
-  const hasConclusionTarget = ["责任人", "凶手", "真凶", "最终答案", "最终责任人", "真相"].some((keyword) =>
+  const hasAnswerVerb = ["答案是", "我的答案", "最终答案是", "结论是", "最终推理"].some((keyword) =>
     lowered.includes(normalize(keyword)),
   );
-  return hasSubmissionVerb && hasConclusionTarget;
+  const hasConclusionClaim = ["责任人是", "凶手是", "真凶是", "最终答案是", "最终责任人是", "真相是", "结论是"].some((keyword) =>
+    lowered.includes(normalize(keyword)),
+  );
+  const hasBeliefConclusion =
+    ["我认为", "我推理"].some((keyword) => lowered.includes(normalize(keyword))) &&
+    ["责任人", "凶手", "真凶", "真相", "答案", "结论", "自杀"].some((keyword) => lowered.includes(normalize(keyword)));
+
+  return !asksQuestion && (hasConclusionClaim || hasBeliefConclusion || ((hasSubmissionVerb || hasAnswerVerb) && input.trim().length >= 4));
 }
 
 export function parseAction(input: string, caseData: CaseData): ParsedAction {

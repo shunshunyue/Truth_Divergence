@@ -308,6 +308,7 @@ export function useInvestigationSession() {
   const [chatMessages, setChatMessages] = useState<InvestigationChatMessage[]>([]);
   const [completedVisualAsset, setCompletedVisualAsset] = useState<VisualAsset | null>(null);
   const [visualFocus, setVisualFocus] = useState<VisualFocusState>(null);
+  const [finalSubmissionPrompt, setFinalSubmissionPrompt] = useState<{ input: string; message: string } | null>(null);
 
   useEffect(() => {
     const snapshot = loadPersistedInvestigation();
@@ -682,6 +683,28 @@ export function useInvestigationSession() {
         setIsActing(false);
       }
 
+      if (event === "game.final_submission.confirmation_required") {
+        setFinalSubmissionPrompt({
+          input: envelope.payload.input,
+          message: envelope.payload.resultText,
+        });
+        setActionStatus(envelope.payload.resultText);
+        setIsActing(false);
+        setChatMessages((current) =>
+          current.map((message) =>
+            message.clientPending
+              ? {
+                  ...message,
+                  text: "等待你确认是否提交最终答案。",
+                  pending: false,
+                  placeholder: false,
+                  clientPending: false,
+                }
+              : message,
+          ),
+        );
+      }
+
       if (event === "turn.finished") {
         setIsActing(false);
       }
@@ -815,10 +838,11 @@ export function useInvestigationSession() {
     return deriveInvestigationData(session.caseData, session.state, session.visualManifest);
   }, [session]);
 
-  async function submitCommand(command: string) {
+  async function submitCommand(command: string, options?: { finalSubmissionConfirmed?: boolean }) {
     const trimmed = command.trim();
-    if (!trimmed || !session || isActing || session.state.phase === "solved") return false;
+    if (!trimmed || !session || isActing || session.state.phase === "solved" || session.state.phase === "failed") return false;
 
+    setFinalSubmissionPrompt(null);
     setIsActing(true);
     setActionStatus("正在解析行动...");
     const localTurnId = `local-${Date.now().toString(36)}`;
@@ -859,6 +883,7 @@ export function useInvestigationSession() {
         type: "player.command",
         sessionId: session.sessionId,
         input: trimmed,
+        finalSubmissionConfirmed: options?.finalSubmissionConfirmed === true,
       });
       return true;
     } catch (error) {
@@ -936,5 +961,7 @@ export function useInvestigationSession() {
     visualFocus,
     activateSession,
     submitCommand,
+    finalSubmissionPrompt,
+    dismissFinalSubmissionPrompt: () => setFinalSubmissionPrompt(null),
   };
 }

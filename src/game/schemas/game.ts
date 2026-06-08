@@ -238,7 +238,7 @@ export type FinalDeduction = z.infer<typeof finalDeductionSchema>;
 export const playerCaseStateSchema = z.object({
   playerId: z.string(),
   caseId: z.string(),
-  phase: z.enum(["opening", "investigating", "closing", "solved"]),
+  phase: z.enum(["opening", "investigating", "closing", "solved", "failed"]),
   truthScore: z.number().min(0).max(100),
   agentLog: z.array(z.string()),
   currentLocation: z.string(),

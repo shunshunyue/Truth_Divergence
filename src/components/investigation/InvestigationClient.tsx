@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { BriefingScreen } from "@/components/investigation/BriefingModal";
 import {
+  CaseEndScreen,
   CenterStage,
   ExitCaseConfirmModal,
+  FinalSubmissionConfirmModal,
   LeftDrawer,
   RelationshipModal,
   TimelineModal,
@@ -13,6 +15,7 @@ import {
 } from "@/components/investigation/InvestigationShell";
 import { useInvestigationSession } from "@/components/investigation/useInvestigationSession";
 import { useRouteTransition } from "@/components/navigation/useRouteTransition";
+import { looksLikeFinalSubmission } from "@/game/engine/parseAction";
 
 const playScreenVariants: Variants = {
   initial: {
@@ -42,23 +45,30 @@ export function InvestigationClient() {
   const [input, setInput] = useState("");
   const [relationshipOpen, setRelationshipOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
-  const [exitPrompt, setExitPrompt] = useState<"manual" | "solved" | null>(null);
+  const [exitPrompt, setExitPrompt] = useState<"manual" | "solved" | "failed" | null>(null);
+  const [localFinalPrompt, setLocalFinalPrompt] = useState<{ input: string; message?: string } | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
-  const solvedPromptedSessionRef = useRef<string | null>(null);
+  const [reviewEndedCase, setReviewEndedCase] = useState(false);
 
   const investigation = useInvestigationSession();
   const session = investigation.session;
   const state = session?.state;
+  const finalSubmissionPrompt = localFinalPrompt ?? investigation.finalSubmissionPrompt;
+  const isCaseEnded = state?.phase === "solved" || state?.phase === "failed";
+  const showEndScreen = Boolean(isCaseEnded && !reviewEndedCase);
 
-  useEffect(() => {
-    if (state?.phase !== "solved" || !session?.sessionId) return;
-    if (solvedPromptedSessionRef.current === session.sessionId) return;
-    solvedPromptedSessionRef.current = session.sessionId;
-    setExitPrompt("solved");
-  }, [session?.sessionId, state?.phase]);
+  async function submitCommand(command: string, options?: { finalSubmissionConfirmed?: boolean }) {
+    const trimmed = command.trim();
+    if (!trimmed) return;
+    if (!options?.finalSubmissionConfirmed && looksLikeFinalSubmission(trimmed)) {
+      setLocalFinalPrompt({
+        input: trimmed,
+        message: "提交后会立刻判定对错，并结束本局。取消后可以继续调查。",
+      });
+      return;
+    }
 
-  async function submitCommand(command: string) {
-    const accepted = await investigation.submitCommand(command);
+    const accepted = await investigation.submitCommand(trimmed, options);
     if (accepted) setInput("");
   }
 
@@ -79,6 +89,19 @@ export function InvestigationClient() {
 
   async function enterInvestigation() {
     return investigation.activateSession();
+  }
+
+  async function confirmFinalSubmission() {
+    const pending = finalSubmissionPrompt;
+    if (!pending) return;
+    setLocalFinalPrompt(null);
+    investigation.dismissFinalSubmissionPrompt();
+    await submitCommand(pending.input, { finalSubmissionConfirmed: true });
+  }
+
+  function cancelFinalSubmission() {
+    setLocalFinalPrompt(null);
+    investigation.dismissFinalSubmissionPrompt();
   }
 
   return (
@@ -108,6 +131,23 @@ export function InvestigationClient() {
             variants={playScreenVariants}
           >
             <BriefingScreen session={session} onClose={enterInvestigation} />
+          </motion.div>
+        ) : session && state && showEndScreen ? (
+          <motion.div
+            animate="animate"
+            className="min-h-0 flex-1"
+            exit="exit"
+            initial="initial"
+            key={`ended-${session.sessionId}-${state.phase}`}
+            variants={playScreenVariants}
+          >
+            <CaseEndScreen
+              caseTitle={session.caseData.title}
+              resultText={session.resultText}
+              state={state}
+              onExit={leaveCase}
+              onReview={() => setReviewEndedCase(true)}
+            />
           </motion.div>
         ) : (
           <motion.div
@@ -142,7 +182,8 @@ export function InvestigationClient() {
               commandDisabled={
                 investigation.isBooting ||
                 investigation.isActing ||
-                state?.phase === "solved"
+                state?.phase === "solved" ||
+                state?.phase === "failed"
               }
               currentLocation={investigation.data?.currentLocation}
               input={input}
@@ -154,7 +195,7 @@ export function InvestigationClient() {
               visualFocus={investigation.visualFocus}
               visualManifest={investigation.session?.visualManifest}
               onCommand={submitCommand}
-              onRequestExit={investigation.isBooting ? cancelBoot : () => setExitPrompt("manual")}
+              onRequestExit={investigation.isBooting ? cancelBoot : () => setExitPrompt(state?.phase === "failed" ? "failed" : state?.phase === "solved" ? "solved" : "manual")}
             />
           </motion.div>
         )}
@@ -179,6 +220,15 @@ export function InvestigationClient() {
           reason={exitPrompt}
           onCancel={() => setExitPrompt(null)}
           onConfirm={confirmExitCase}
+        />
+      )}
+      {finalSubmissionPrompt && session && (
+        <FinalSubmissionConfirmModal
+          caseTitle={session.caseData.title}
+          command={finalSubmissionPrompt.input}
+          message={finalSubmissionPrompt.message}
+          onCancel={cancelFinalSubmission}
+          onConfirm={confirmFinalSubmission}
         />
       )}
     </main>

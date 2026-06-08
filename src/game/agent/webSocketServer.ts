@@ -35,6 +35,7 @@ function parseClientMessage(raw: WebSocket.RawData): AgentClientMessage {
       type: "player.command",
       sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : "",
       input: typeof parsed.input === "string" ? parsed.input : "",
+      finalSubmissionConfirmed: parsed.finalSubmissionConfirmed === true,
     };
   }
 
@@ -101,7 +102,9 @@ export function createAgentWebSocketServer() {
           }
 
           console.log(`[agent:ws] player.command session=${message.sessionId} input=${message.input}`);
-          await roomAgent.command(message.sessionId, message.input);
+          await roomAgent.command(message.sessionId, message.input, {
+            finalSubmissionConfirmed: message.finalSubmissionConfirmed === true,
+          });
         })
         .catch((error) => {
           console.error("[agent:ws] failed", error);

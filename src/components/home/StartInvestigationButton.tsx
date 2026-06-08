@@ -25,6 +25,7 @@ const phaseLabels: Record<string, string> = {
   investigating: "调查中",
   closing: "收束中",
   solved: "已结案",
+  failed: "已结束",
 };
 
 function clearPersistedInvestigation() {
@@ -46,7 +47,7 @@ function summarizeSession(session: unknown, savedAt?: number): SavedInvestigatio
     phase,
     savedAt,
     truthScore: typeof candidate.state?.truthScore === "number" ? candidate.state.truthScore : undefined,
-    unfinished: phase !== "solved",
+    unfinished: phase !== "solved" && phase !== "failed",
   };
 }
 
