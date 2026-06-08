@@ -8,6 +8,7 @@ import {
   CenterStage,
   ExitCaseConfirmModal,
   FinalSubmissionConfirmModal,
+  GameHelpModal,
   LeftDrawer,
   RelationshipModal,
   TimelineModal,
@@ -40,15 +41,19 @@ const playScreenVariants: Variants = {
   },
 };
 
+const gameHelpSeenKey = "td-game-help-seen-v1";
+
 export function InvestigationClient() {
   const router = useRouteTransition();
   const [input, setInput] = useState("");
   const [relationshipOpen, setRelationshipOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [exitPrompt, setExitPrompt] = useState<"manual" | "solved" | "failed" | null>(null);
   const [localFinalPrompt, setLocalFinalPrompt] = useState<{ input: string; message?: string } | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
   const [reviewEndedCase, setReviewEndedCase] = useState(false);
+  const autoHelpHandledRef = useRef(false);
 
   const investigation = useInvestigationSession();
   const session = investigation.session;
@@ -56,6 +61,29 @@ export function InvestigationClient() {
   const finalSubmissionPrompt = localFinalPrompt ?? investigation.finalSubmissionPrompt;
   const isCaseEnded = state?.phase === "solved" || state?.phase === "failed";
   const showEndScreen = Boolean(isCaseEnded && !reviewEndedCase);
+
+  useEffect(() => {
+    if (
+      autoHelpHandledRef.current ||
+      !session ||
+      investigation.isBooting ||
+      investigation.showBriefing ||
+      isCaseEnded ||
+      showEndScreen ||
+      isLeaving
+    ) {
+      return;
+    }
+
+    autoHelpHandledRef.current = true;
+    try {
+      if (window.localStorage.getItem(gameHelpSeenKey)) return;
+      window.localStorage.setItem(gameHelpSeenKey, "1");
+      setHelpOpen(true);
+    } catch {
+      setHelpOpen(true);
+    }
+  }, [investigation.isBooting, investigation.showBriefing, isCaseEnded, isLeaving, session, showEndScreen]);
 
   async function submitCommand(command: string, options?: { finalSubmissionConfirmed?: boolean }) {
     const trimmed = command.trim();
@@ -195,6 +223,7 @@ export function InvestigationClient() {
               visualFocus={investigation.visualFocus}
               visualManifest={investigation.session?.visualManifest}
               onCommand={submitCommand}
+              onOpenHelp={() => setHelpOpen(true)}
               onRequestExit={investigation.isBooting ? cancelBoot : () => setExitPrompt(state?.phase === "failed" ? "failed" : state?.phase === "solved" ? "solved" : "manual")}
             />
           </motion.div>
@@ -207,6 +236,7 @@ export function InvestigationClient() {
       {timelineOpen && state && investigation.data && (
         <TimelineModal data={investigation.data} state={state} onClose={() => setTimelineOpen(false)} />
       )}
+      {helpOpen && <GameHelpModal onClose={() => setHelpOpen(false)} />}
       {investigation.completedVisualAsset && (
         <VisualReadyModal
           asset={investigation.completedVisualAsset}

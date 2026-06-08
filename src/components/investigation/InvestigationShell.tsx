@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
+  BookOpenText,
   ChevronDown,
   ChevronRight,
   Clock3,
@@ -9,6 +10,7 @@ import {
   FileText,
   Fingerprint,
   GitBranch,
+  HelpCircle,
   ImageIcon,
   LogOut,
   MapPin,
@@ -821,6 +823,201 @@ export function ExitCaseConfirmModal({
   );
 }
 
+export function GameHelpModal({ onClose }: { onClose: () => void }) {
+  const helpSections = [
+    {
+      title: "调查目标",
+      body: "你要通过对话推进调查，找出案件的真实结论：谁、为什么、怎么发生，以及哪些证据能支撑你的判断。左侧案卷会随着调查更新人物、证据、关系图和时间线。",
+      icon: <Fingerprint size={16} />,
+      tone: "border-[#b8d8d2] bg-[#e8f6f2] text-[#24615b]",
+    },
+    {
+      title: "怎么调查",
+      body: "直接像问 AI 一样输入问题。可以要求查看门禁、监控、通话记录、定位、现场物件、证词、财务流水，也可以让系统比较两条证据或复核某个时间段。",
+      icon: <Search size={16} />,
+      tone: "border-[#cdbf9e] bg-[#fff8e8] text-[#9d6d21]",
+    },
+    {
+      title: "怎么问询",
+      body: "当出现嫌疑人或证人后，可以点人物进入问询，也可以在聊天里指定对象。用已经发现的证据追问矛盾点，比泛泛提问更容易撬出新线索。",
+      icon: <UserRound size={16} />,
+      tone: "border-[#d0a092] bg-[#fff0ea] text-[#a64e3b]",
+    },
+    {
+      title: "怎么整理",
+      body: "左侧的关系图和时间线会帮你复盘。发现新证据后，建议回到时间线检查顺序，再看人物关系里谁有机会、动机和可疑空白。",
+      icon: <GitBranch size={16} />,
+      tone: "border-[#c8bda7] bg-[#f4efe5] text-[#675d4f]",
+    },
+  ];
+  const flowSteps = [
+    { label: "查线索", icon: <Search size={15} /> },
+    { label: "问人物", icon: <UserRound size={15} /> },
+    { label: "排时间", icon: <Clock3 size={15} /> },
+    { label: "提交", icon: <Stamp size={15} /> },
+  ];
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[71] grid place-items-center bg-[#27241f]/40 p-3 backdrop-blur sm:p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="grid max-h-[min(90dvh,46rem)] w-full max-w-2xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-[#cfa65b] bg-[#fffdf7] shadow-[0_30px_110px_rgba(31,25,17,0.32)]"
+        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.985 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-[#d8cfba] bg-[#fbf8f0] px-5 py-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-[#b8d8d2] bg-[#e8f6f2] text-[#24615b]">
+              <BookOpenText size={18} />
+            </span>
+            <div className="min-w-0">
+              <p className="font-mono text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[#24615b]">
+                field manual
+              </p>
+              <h3 className="mt-1 text-lg font-black leading-tight text-[#27241f]">玩法帮助</h3>
+            </div>
+          </div>
+          <button
+            aria-label="关闭玩法帮助"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[#8b8171] transition hover:bg-[#f4efe5] hover:text-[#9d6d21]"
+            onClick={onClose}
+            title="关闭"
+            type="button"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        <div className="td-scrollbar min-h-0 overflow-y-auto px-5 py-4">
+          <div className="relative overflow-hidden rounded-lg border border-[#cfa65b] bg-[#f8f3e8] shadow-[inset_0_0_0_1px_rgba(255,253,247,0.72)]">
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(39,36,31,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(39,36,31,0.06)_1px,transparent_1px)] bg-[size:22px_22px]" />
+            <div className="relative grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_15rem]">
+              <div className="min-w-0">
+                <p className="font-mono text-[0.6rem] font-bold uppercase tracking-[0.16em] text-[#24615b]">
+                  case board
+                </p>
+                <h4 className="mt-1 text-base font-black leading-tight text-[#27241f]">一句话开查，一条证据推进</h4>
+                <p className="mt-2 text-sm leading-6 text-[#4f483d]">
+                  这是一个对话式推理案件。你不需要记命令格式，直接说你想查什么、问谁、比对哪条线索即可。
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {flowSteps.map((step, index) => (
+                    <div key={step.label} className="relative min-w-0">
+                      {index > 0 && (
+                        <span className="absolute -left-2 top-4 hidden h-px w-2 bg-[#cfa65b] sm:block" aria-hidden />
+                      )}
+                      <div className="grid min-h-[4.5rem] place-items-center rounded-md border border-[#d8cfba] bg-[#fffdf7]/84 p-2 text-center shadow-[0_8px_20px_rgba(49,40,28,0.08)]">
+                        <span className="grid h-8 w-8 place-items-center rounded-full border border-[#b8d8d2] bg-[#e8f6f2] text-[#24615b]">
+                          {step.icon}
+                        </span>
+                        <span className="mt-1 font-mono text-[0.58rem] font-bold text-[#675d4f]">{step.label}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="relative min-h-[11rem] overflow-hidden rounded-md border border-[#d8cfba] bg-[#fffdf7]/88 p-3 shadow-[0_14px_38px_rgba(49,40,28,0.12)]">
+                <div className="absolute right-3 top-3 rounded-sm border border-[#d0a092] bg-[#fff0ea] px-2 py-1 font-mono text-[0.54rem] font-bold uppercase text-[#a64e3b]">
+                  final
+                </div>
+                <div className="absolute left-5 top-5 h-12 w-16 -rotate-3 rounded-sm border border-[#cdbf9e] bg-[#fff8e8] p-2 shadow-sm">
+                  <FileText size={15} className="text-[#9d6d21]" />
+                  <span className="mt-2 block h-1 w-10 rounded-full bg-[#d6c9ae]" />
+                  <span className="mt-1 block h-1 w-7 rounded-full bg-[#d6c9ae]" />
+                </div>
+                <div className="absolute right-8 top-14 h-12 w-12 rotate-6 rounded-full border border-[#b8d8d2] bg-[#e8f6f2] p-2 shadow-sm">
+                  <Fingerprint size={18} className="mx-auto text-[#24615b]" />
+                  <span className="mt-1 block h-1 rounded-full bg-[#9cc8bf]" />
+                </div>
+                <div className="absolute bottom-4 left-4 right-4 rounded-md border border-[#143b37] bg-[#163c3a] px-3 py-2 text-[#eafffb] shadow-[0_10px_24px_rgba(20,59,55,0.2)]">
+                  <div className="mb-1 flex items-center gap-1.5 font-mono text-[0.54rem] uppercase text-[#b8d8d2]">
+                    <Stamp size={12} />
+                    verdict prompt
+                  </div>
+                  <p className="font-mono text-[0.68rem] font-bold leading-snug">提交 他是自杀的</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {helpSections.map((section, index) => (
+              <div
+                key={section.title}
+                className="min-w-0 rounded-md border border-[#d8cfba] bg-[#fffdf7] p-3 shadow-[0_10px_28px_rgba(49,40,28,0.08)]"
+              >
+                <div className="flex items-center gap-2">
+                  <span className={["grid h-8 w-8 shrink-0 place-items-center rounded-md border", section.tone].join(" ")}>
+                    {section.icon}
+                  </span>
+                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-sm border border-[#cdbf9e] bg-[#fff8e8] font-mono text-[0.58rem] font-bold text-[#9d6d21]">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <p className="text-sm font-black text-[#27241f]">{section.title}</p>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-[#625a4d]">{section.body}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 grid gap-3 rounded-lg border border-[#b8d8d2] bg-[#e8f6f2] p-4 sm:grid-cols-[minmax(0,1fr)_13rem] sm:items-center">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Stamp size={15} className="shrink-0 text-[#24615b]" />
+                <p className="text-sm font-black text-[#143b37]">怎么提交最终答案</p>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-[#315f58]">
+                在聊天输入框里直接提交结论，例如“提交 他是自杀的”“答案是张某作案”“凶手是李某，动机是灭口”。系统会先弹出确认框；点确定后会立刻判断对错并进入结束页面，点取消则继续调查。
+              </p>
+            </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_1.25rem_minmax(0,1fr)] items-center gap-2">
+              <div className="rounded-md border border-[#c8bda7] bg-[#fffdf7] p-2 shadow-sm">
+                <p className="font-mono text-[0.54rem] uppercase text-[#8f8574]">chat</p>
+                <p className="mt-1 truncate font-mono text-[0.62rem] font-bold text-[#27241f]">提交 结论...</p>
+              </div>
+              <div className="h-px bg-[#24615b]" aria-hidden />
+              <div className="rounded-md border border-[#143b37] bg-[#163c3a] p-2 text-[#eafffb] shadow-sm">
+                <p className="font-mono text-[0.54rem] uppercase text-[#b8d8d2]">judge</p>
+                <p className="mt-1 font-mono text-[0.62rem] font-bold">结束页</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-md border border-[#d0a092] bg-[#fff0ea] p-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} className="shrink-0 text-[#a64e3b]" />
+              <p className="text-sm font-black text-[#6d2d25]">提交前建议确认</p>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-[#7b5148]">
+              最终答案不是普通聊天。只要确认提交，本局就会结束；如果你还没确定关键证据链，先取消，继续查时间线、人物矛盾和证据来源。
+            </p>
+          </div>
+        </div>
+
+        <div className="flex justify-end border-t border-[#d8cfba] bg-[#fbf8f0] px-5 py-4">
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#143b37] bg-[#163c3a] px-4 font-mono text-xs font-bold text-[#eafffb] transition hover:bg-[#24615b]"
+            onClick={onClose}
+            type="button"
+          >
+            <ShieldCheck size={14} />
+            明白了
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function VisualStage({
   chatMode,
   focus,
@@ -1349,6 +1546,7 @@ export function CenterStage({
   visualFocus,
   visualManifest,
   onCommand,
+  onOpenHelp,
   onRequestExit,
 }: {
   activeStep: BootStepId;
@@ -1368,6 +1566,7 @@ export function CenterStage({
   visualFocus: VisualFocusState;
   visualManifest?: CaseVisualManifest;
   onCommand: (command: string) => void;
+  onOpenHelp: () => void;
   onRequestExit: () => void;
 }) {
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -1447,14 +1646,14 @@ export function CenterStage({
           )}
 
           <motion.div
-            className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b px-5 shadow-[0_12px_36px_rgba(36,30,22,0.08)]"
+            className="relative z-10 flex h-14 shrink-0 items-center justify-between gap-3 border-b px-3 shadow-[0_12px_36px_rgba(36,30,22,0.08)] sm:px-5"
             animate={{
               backgroundColor: isInterrogation ? "rgba(255, 240, 234, 0.94)" : "rgba(251, 248, 240, 0.9)",
               borderColor: isInterrogation ? "#d0a092" : "#c8c0ae",
             }}
             transition={{ duration: 0.28 }}
           >
-            <div className="flex min-w-0 items-center gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               <motion.span
                 className="grid h-9 w-9 place-items-center rounded-md border text-[#d8fff8] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)]"
                 animate={{
@@ -1474,9 +1673,18 @@ export function CenterStage({
                 </p>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex min-w-0 shrink-0 items-center gap-2">
+              <button
+                aria-label="玩法帮助"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#d8cfba] bg-[#fffdf7]/78 text-[#675d4f] shadow-sm transition hover:border-[#24615b] hover:bg-[#e8f6f2] hover:text-[#24615b]"
+                onClick={onOpenHelp}
+                title="玩法帮助"
+                type="button"
+              >
+                <HelpCircle size={15} />
+              </button>
               <motion.div
-                className="flex min-w-0 max-w-[15rem] items-center gap-2 rounded-full border bg-white/70 px-3 py-1.5 font-mono text-[0.62rem]"
+                className="hidden min-w-0 max-w-[9.5rem] items-center gap-2 rounded-full border bg-white/70 px-3 py-1.5 font-mono text-[0.62rem] sm:flex lg:max-w-[15rem]"
                 animate={{
                   borderColor: phase === "failed" ? "#d0a092" : isInterrogation ? "#d0a092" : "#d8cfba",
                   color: phase === "failed" ? "#a64e3b" : isInterrogation ? "#a64e3b" : "#24615b",
