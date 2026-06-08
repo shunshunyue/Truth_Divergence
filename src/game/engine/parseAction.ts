@@ -23,10 +23,22 @@ function normalize(input: string) {
 
 function findNameMatch(input: string, items: Array<{ id: string; name?: string; title?: string }>) {
   const lowered = normalize(input);
-  return items.find((item) => {
+  const directMatch = items.find((item) => {
     const candidates = [item.id, item.name, item.title].filter(Boolean) as string[];
     return candidates.some((candidate) => lowered.includes(normalize(candidate)));
   });
+  if (directMatch) return directMatch;
+
+  const fuzzyMatches = items.filter((item) => {
+    const candidates = [item.name, item.title].filter(Boolean) as string[];
+    return candidates.some((candidate) => {
+      const normalized = normalize(candidate);
+      if (normalized.length < 3) return false;
+      return lowered.includes(normalized.slice(0, 2));
+    });
+  });
+
+  return fuzzyMatches.length === 1 ? fuzzyMatches[0] : undefined;
 }
 
 function looksLikeFactFindingQuestion(input: string) {

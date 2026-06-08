@@ -227,6 +227,9 @@ export async function routeChatCommandWithAi(options: RouteChatWithAiOptions): P
   if (options.fallbackRoute.kind === "off_topic" || options.fallbackRoute.kind === "spoiler_request") {
     return options.fallbackRoute;
   }
+  if (options.fallbackRoute.kind === "start_interrogation" || options.fallbackRoute.kind === "suspect_question") {
+    return options.fallbackRoute;
+  }
 
   try {
     const raw = await requestAiJsonStream<unknown>({

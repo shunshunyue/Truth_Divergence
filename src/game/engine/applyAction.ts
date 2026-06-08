@@ -103,19 +103,24 @@ function unlockLocations(caseData: CaseData, state: PlayerCaseState) {
 }
 
 function applyInterrogation(caseData: CaseData, state: PlayerCaseState, action: ParsedAction) {
-  const suspectId = action.targetSuspect ?? caseData.suspects[0]?.id;
-  if (!suspectId) return "这轮问询先作为人物线索记录，需要从现场物件或出入记录里锁定具体对象。";
-  if (!state.visibleSuspects.includes(suspectId)) return "这个人先作为待核验关联对象记录，需要从线索或证据中确认其出场关系。";
-
+  const suspectId = action.targetSuspect ?? state.visibleSuspects[0] ?? caseData.suspects[0]?.id;
+  if (!suspectId) return { resultText: "这轮问询先作为人物线索记录，需要从现场物件或出入记录里锁定具体对象。" };
   const suspect = caseData.suspects.find((item) => item.id === suspectId);
-  if (!suspect) return "这条人物指向先记为待核验，需要继续比对案件档案和现场记录。";
+  if (!suspect) return { resultText: "这条人物指向先记为待核验，需要继续比对案件档案和现场记录。" };
+
+  let unlockedSuspect: SuspectProfile | undefined;
+  if (!state.visibleSuspects.includes(suspectId)) {
+    if (!action.targetSuspect) return { resultText: "这个人先作为待核验关联对象记录，需要从线索或证据中确认其出场关系。" };
+    state.visibleSuspects.push(suspectId);
+    unlockedSuspect = suspect;
+  }
 
   if (!state.interviewedSuspects.includes(suspectId)) {
     state.interviewedSuspects.push(suspectId);
   }
 
   const suspectState = state.suspectStates[suspectId];
-  if (!suspectState) return `${suspect.name} 当前没有可用的审讯状态。`;
+  if (!suspectState) return { resultText: `${suspect.name} 当前没有可用的审讯状态。`, unlockedSuspect };
 
   // 语气只影响状态数值，不直接让嫌疑人吐露隐藏真相。
   // 是否暴露矛盾，仍要靠证据、压力和 breakConditions 继续细化。
@@ -131,7 +136,10 @@ function applyInterrogation(caseData: CaseData, state: PlayerCaseState, action: 
     suspectState.currentEmotion = "nervous";
   }
 
-  return `${suspect.name} 已进入审讯记录。压力 ${suspectState.pressure}，信任 ${suspectState.trust}。`;
+  return {
+    resultText: `${suspect.name} 已进入审讯记录。压力 ${suspectState.pressure}，信任 ${suspectState.trust}。`,
+    unlockedSuspect,
+  };
 }
 
 function applyUseEvidence(caseData: CaseData, state: PlayerCaseState, action: ParsedAction) {
@@ -356,7 +364,11 @@ export function applyAction(input: string, caseData: CaseData, previousState: Pl
       break;
     }
     case "INTERROGATE_SUSPECT":
-      resultText = applyInterrogation(caseData, state, parsedAction);
+      {
+        const interrogation = applyInterrogation(caseData, state, parsedAction);
+        resultText = interrogation.resultText;
+        if (interrogation.unlockedSuspect) directlyUnlockedSuspects = [interrogation.unlockedSuspect];
+      }
       break;
     case "USE_EVIDENCE":
       resultText = applyUseEvidence(caseData, state, parsedAction);
