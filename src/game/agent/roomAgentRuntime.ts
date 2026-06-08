@@ -77,6 +77,7 @@ type FinalizeActionOptions = {
   result: ActionResult;
   resultText: string;
   sessionId: string;
+  turnId?: string;
 };
 
 const caseCacheClaimPollMs = 2_000;
@@ -310,6 +311,25 @@ function shouldHoldPlayerFacingBuffer(text: string) {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function compactTitleList(titles: string[]) {
+  const visible = titles.filter(Boolean).slice(0, 2);
+  if (!visible.length) return "对应证据";
+  const suffix = titles.length > visible.length ? `等 ${titles.length} 份` : "";
+  return `${visible.map((title) => `「${title}」`).join("、")}${suffix}`;
+}
+
+function replyMentionsVisualAttachment(text: string) {
+  return /证据影像|证据图|图片|照片|截图|附在|贴在|贴上|调出.*图|影像.*整理|整理.*影像|图.*下面|下面.*图/.test(text);
+}
+
+function pendingEvidenceVisualNotice(evidenceItems: CaseData["evidence"]) {
+  return `我正在把${compactTitleList(evidenceItems.map((item) => item.title))}的证据影像整理出来，稍等会贴在这轮记录下面。`;
+}
+
+function readyVisualAttachmentNotice(assets: VisualAsset[]) {
+  return `我把${compactTitleList(assets.map((asset) => asset.title))}的影像附在下面了，先看图里的细节。`;
 }
 
 function shouldUseRuntimeDiscovery(input: string, result: ActionResult) {
@@ -619,6 +639,7 @@ export class RoomAgentRuntime {
           result,
           resultText: result.resultText,
           sessionId,
+          turnId,
         });
         this.enqueueVisualFocus(finalSession, {
           ...visualFocusDecision,
@@ -774,6 +795,7 @@ export class RoomAgentRuntime {
           result,
           resultText: finalResultText,
           sessionId,
+          turnId,
         });
         this.enqueueVisualFocus(finalSession, {
           ...visualFocusDecision,
@@ -844,6 +866,7 @@ export class RoomAgentRuntime {
         result,
         resultText: finalResultText,
         sessionId,
+        turnId,
       });
       this.enqueueVisualFocus(finalSession, {
         ...visualFocusDecision,
@@ -913,6 +936,7 @@ export class RoomAgentRuntime {
     result,
     resultText,
     sessionId,
+    turnId,
   }: FinalizeActionOptions) {
     this.enqueue(
       {
@@ -975,7 +999,17 @@ export class RoomAgentRuntime {
       session: finalSession,
     });
     if (visualEvidence.length) {
-      this.generateEvidenceVisualsInBackground(finalSession, visualEvidence);
+      if (turnId && !replyMentionsVisualAttachment(resultText)) {
+        const notice = pendingEvidenceVisualNotice(visualEvidence);
+        const attachmentMessageId = this.streamVisualNoticeMessage({
+          sessionId,
+          turnId,
+          text: notice,
+        });
+        this.generateEvidenceVisualsInBackground(finalSession, visualEvidence, turnId, attachmentMessageId);
+      } else {
+        this.generateEvidenceVisualsInBackground(finalSession, visualEvidence, turnId);
+      }
     }
     this.enqueueBackgroundMetadata(finalSession);
     return finalSession;
@@ -1151,7 +1185,12 @@ export class RoomAgentRuntime {
     return Array.from(selected.values()).slice(0, limit);
   }
 
-  private generateEvidenceVisualsInBackground(session: GameSession, evidenceItems: CaseData["evidence"]) {
+  private generateEvidenceVisualsInBackground(
+    session: GameSession,
+    evidenceItems: CaseData["evidence"],
+    turnId?: string,
+    attachmentMessageId?: string,
+  ) {
     if (!shouldGenerateRuntimeVisualAssets()) return;
     if (!session.visualManifest?.cacheId || !evidenceItems.length) return;
     const cacheId = session.visualManifest.cacheId;
@@ -1200,6 +1239,7 @@ export class RoomAgentRuntime {
             visualManifest: updatedManifest,
           };
           this.enqueueVisualAssetReady(session.sessionId, readyAsset);
+          if (turnId) this.enqueueChatVisualAttachment(updatedSession, turnId, readyAsset, attachmentMessageId);
           this.enqueueVisualFocus(updatedSession, {
             mode: "evidence",
             entityId: evidence.id,
@@ -1389,7 +1429,7 @@ export class RoomAgentRuntime {
     );
   }
 
-  private enqueueChatVisualAttachment(session: GameSession, turnId: string, asset: VisualAsset) {
+  private enqueueChatVisualAttachment(session: GameSession, turnId: string, asset: VisualAsset, messageId?: string) {
     this.enqueue(
       {
         event: "chat.attachment.added",
@@ -1397,11 +1437,37 @@ export class RoomAgentRuntime {
         payload: {
           sessionId: session.sessionId,
           turnId,
+          ...(messageId ? { messageId } : {}),
           asset: publicVisualAsset(asset),
         },
       },
       { priority: "normal", sessionId: session.sessionId, scope: "chat.attachment" },
     );
+  }
+
+  private streamVisualNoticeMessage({
+    sessionId,
+    text,
+    turnId,
+  }: {
+    sessionId: string;
+    text: string;
+    turnId: string;
+  }) {
+    const messageId = this.streamChatMessage({
+      sessionId,
+      turnId,
+      speaker: "system",
+      label: "影像整理",
+      text,
+    });
+    appendSessionChatMessage(sessionId, {
+      role: "assistant",
+      speaker: "system",
+      label: "影像整理",
+      text,
+    });
+    return messageId;
   }
 
   private revealTriggeredVisualAssets({
@@ -1442,9 +1508,18 @@ export class RoomAgentRuntime {
       visualManifest: updatedManifest,
     };
 
-    for (const asset of updatedManifest.assets.filter((item) => revealedIds.has(item.id))) {
+    const revealedAssets = updatedManifest.assets.filter((item) => revealedIds.has(item.id));
+    const attachmentMessageId = !replyMentionsVisualAttachment(reply)
+      ? this.streamVisualNoticeMessage({
+        sessionId: session.sessionId,
+        turnId,
+        text: readyVisualAttachmentNotice(revealedAssets),
+      })
+      : undefined;
+
+    for (const asset of revealedAssets) {
       this.enqueueVisualAssetReady(session.sessionId, asset);
-      this.enqueueChatVisualAttachment(updatedSession, turnId, asset);
+      this.enqueueChatVisualAttachment(updatedSession, turnId, asset, attachmentMessageId);
       this.enqueueVisualFocus(updatedSession, {
         mode: asset.kind === "evidence" || asset.kind === "clue_object" ? "evidence" : asset.kind === "location" ? "scene" : "case",
         entityId: asset.entityId,
@@ -1544,6 +1619,8 @@ export class RoomAgentRuntime {
       },
       { priority: "normal", sessionId, scope: "chat", delayMs: delayMs + 10 },
     );
+
+    return messageId;
   }
 
   private async streamFixedChatMessage({

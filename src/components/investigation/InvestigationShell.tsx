@@ -1454,7 +1454,7 @@ export function CenterStage({
             <AnimatePresence initial={false}>
               {cmdExpanded && recommendedCommands.length > 0 && (
                 <motion.div
-                  className="absolute bottom-[calc(100%-1px)] left-[-1px] right-[-1px] flex gap-2 overflow-x-auto rounded-t-lg border border-b-0 border-[#cfc4ad] bg-[#fffdf7]/96 px-3 py-2 backdrop-blur"
+                  className="td-scrollbar-hidden absolute bottom-[calc(100%-1px)] left-[-1px] right-[-1px] grid max-h-[min(13rem,calc(100dvh-9rem))] grid-cols-1 gap-2 overflow-y-auto rounded-t-lg border border-b-0 border-[#cfc4ad] bg-[#fffdf7]/96 px-3 py-2 backdrop-blur sm:grid-cols-2 lg:grid-cols-3"
                   initial={{ opacity: 0, y: 7 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 7 }}
@@ -1463,7 +1463,7 @@ export function CenterStage({
                   {recommendedCommands.map((cmd) => (
                     <motion.button
                       key={cmd}
-                      className="h-7 shrink-0 rounded-full border border-[#d8cfba] bg-[#f4efe5] px-2.5 font-mono text-[0.63rem] text-[#675d4f] transition hover:border-[#24615b] hover:text-[#24615b]"
+                      className="min-h-8 min-w-0 rounded-full border border-[#d8cfba] bg-[#f4efe5] px-3 py-1.5 text-left font-mono text-[0.63rem] leading-snug text-[#675d4f] transition hover:border-[#24615b] hover:bg-[#eef7f4] hover:text-[#24615b]"
                       disabled={commandDisabled}
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -1471,7 +1471,7 @@ export function CenterStage({
                       onMouseDown={(e) => { e.preventDefault(); onCommand(cmd); setCmdExpanded(false); }}
                       type="button"
                     >
-                      {cmd}
+                      <span className="block min-w-0 whitespace-normal break-words">{cmd}</span>
                     </motion.button>
                   ))}
                 </motion.div>
